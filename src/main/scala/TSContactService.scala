@@ -1,21 +1,96 @@
+import TSCommon.Commons.{Response, _}
+import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotOffer}
+
+
 object TSContactService {
+  case class ContactRepository(contacts: Map[Int, Contacts])
 
-  import java.util.UUID
+  class ContactService extends PersistentActor {
+    var state: ContactRepository = ContactRepository(Map())
+    override def preStart(): Unit = {
+      println("TravelService prestart")
+      super.preStart()
+    }
 
-  trait ContactsService {
-    def createContacts(contacts: Nothing, headers: Nothing): Nothing
+    override def postRestart(reason: Throwable): Unit = {
+      println("TravelService post restart")
+      println(reason)
+      super.postRestart(reason)
+    }
 
-    def create(addContacts: Nothing, headers: Nothing): Nothing
+    override def persistenceId = "TravelService-id"
 
-    def delete(contactsId: UUID, headers: Nothing): Nothing
+    override def recovery: Recovery = super.recovery
 
-    def modify(contacts: Nothing, headers: Nothing): Nothing
+    override def receiveRecover: Receive = {
+      case SnapshotOffer(_, offeredSnapshot: ContactRepository) ⇒ state = offeredSnapshot
+      case RecoveryCompleted =>
+        println("TravelService RecoveryCompleted")
+      case x: Evt ⇒
+        println("recovering: " + x)
+        updateState(x)
+    }
 
-    def getAllContacts(headers: Nothing): Nothing
+    def updateState(evt: Evt): Unit = evt match {
+      case c: AddContact ⇒ state = ContactRepository(state.contacts + (c.contact.id -> c.contact))
+      case c: DeleteContact => state = ContactRepository(state.contacts - c.contactsId)
+    }
 
-    def findContactsById(id: UUID, headers: Nothing): Nothing
+    override def receiveCommand: Receive = {
+      case c:AddContact =>
+        state.contacts.get(c.contact.id) match {
+          case Some(_) =>
+            sender() ! Response(1, "Error: Already exists", None)
+          case None =>
+            persist(c)(updateState)
+            sender() ! Response(0, "Added", None)
+        }
 
-    def findContactsByAccountId(accountId: UUID, headers: Nothing): Nothing
+
+
+      case c:DeleteContact =>
+        state.contacts.get(c.contactsId) match {
+          case Some(_) =>
+            persist(c)(updateState)
+            sender() ! Response(0, "Deleted", None)
+
+          case None =>
+            sender() ! Response(1, "Error: contact does not exists", None)
+        }
+
+      case c:ModifyContact =>
+        state.contacts.get(c.mci.id) match {
+          case Some(_) =>
+            persist(AddContact(c.mci))(updateState)
+            sender() ! Response(0, "Updated", None)
+
+          case None =>
+            sender() ! Response(1, "Error: contact does not exists", None)
+        }
+
+      case GetAllContacts =>
+        sender() ! Response(0, "Success", state.contacts.values.toList)
+
+      case c:FindContactsById =>
+        state.contacts.get(c.id) match {
+          case Some(contacts) =>
+            persist(c)(updateState)
+            sender() ! Response(0, "Found", contacts)
+
+          case None =>
+            sender() ! Response(1, "Error: contact does not exists", None)
+        }
+
+      case c:FindContactsByAccountId =>
+        val contact: Iterable[Contacts] = state.contacts.values.filter(contacts => contacts.accountId == c.accountId)
+        if(contact != null){
+          sender() ! Response(0, "Found", contact.head)
+
+        }else{
+          sender() ! Response(1, "Not Found", None)
+        }
+
+    }
+
   }
-
 }

@@ -85,10 +85,10 @@ num:Int)
                         var hardBed : Int= 0,
                         var softBed : Int= 0,
                         var highSoftBed : Int= 0)
-  case class TripAllDetailInfo (tripId: Int, travelDate: Date, from: String, to:String)
+  case class TripAllDetailInfo (tripId: Int, travelDate: Date, from: String, to: String)
 
 
-  class ConsignPrice (id: Int,index: Int, initialWeight: Double, initialPrice: Double,withinPrice: Double, beyondPrice: Double)
+  case class ConsignPrice(id: Int,index: Int, initialWeight: Double, initialPrice: Double,withinPrice: Double, beyondPrice: Double)
 
   case class TripAllDetail(tripResponse: TripResponse, trip: Trip)
   case class  TripInfo (startingPlace: String, endPlace: String, departureTime: Date)
@@ -122,8 +122,7 @@ num:Int)
     var from: Int,
     var to: Int,
     var status: Int,
-    price: Double,
-                  )
+    price: Double)
 
   case class OrderTicketsInfo (
     contactsId: Int,
@@ -132,8 +131,8 @@ num:Int)
     loginToken: String,
    accountId: Int,
   date: Date,
-    from: String,
-    to: String,
+   fro: Int,
+    to: Int,
     )
 
   case class PaymentDifferenceInfo(
@@ -144,9 +143,11 @@ num:Int)
     )
  case class PaymentInfo( userId: Int, orderId: Int, tripId: Int, price: Double)
 
+ case class Payment (var Id: Int = -1, orderId: Int, userId: Int, price: Double)
+ case class Payment2 (var Id: Int = -1, orderId: Int, userId: Int, price: Double, var paymentType: (String, Int) = null)
 
 
-  final case class PaymentType (P:(String,Int) =  ("Payment",1), D:(String,Int)=("Difference",2),O:(String,Int)=("Outside Payment",3),E:(String,Int)=("Difference & Outside Payment",4))
+ final case class PaymentType (P:(String,Int) =  ("Payment",1), D:(String,Int)=("Difference",2),O:(String,Int)=("Outside Payment",3),E:(String,Int)=("Difference & Outside Payment",4))
 
 
 
@@ -217,7 +218,7 @@ num:Int)
     enableBoughtDateQuery: Boolean,
     enableStateQuery: Boolean)
 
-  case  class Mail ( mailFrom: String, mailTo: String, mailCc: String, mailBcc: String, mailSubject: String, mailContent: String, contentType: String, attachments: List[Any], model: Map[String,Any])
+  case  class Mail ( mailFrom: String, mailto: Int, mailCc: String, mailBcc: String, mailSubject: String, mailContent: String, contentType: String, attachments: List[Any], model: Map[String,Any])
   case class NotifyInfo(email: String, orderNumber: Int, username: String, startingPlace: Int, endPlace: Int, startingTime: Date, date: Date, seatClass: Int, seatNumber: Int, price: Double)
 
 
@@ -225,7 +226,7 @@ num:Int)
   case class OrderAlterInfo (accountId: Int, previousOrderId: Int, loginToken: String, newOrderInfo: Order)
 
 
- case class Payment (Id: Int, orderId: Int, userId: Int, price: Double)
+
 
 
 
@@ -235,10 +236,10 @@ num:Int)
   case class PlainAssurance(id: Int, oderId: Int, typeIndex: Int, typeName: String, typePrice: String)
 
   case class AssuranceType(assuranceTypes: List[(Int,String, Double)]= List((1, "Traffic Accident Assurance", 3.0)))
-  case class Consign(id: Int, orderId:Int, accountId: Int, handleDate: Date, targetDate: Date, from: String, to: String, consignee: String, phone: String, weight: Double, isWithin: Boolean)
+  case class Consign(id: Int, orderId:Int, accountId: Int, handleDate: Date, targetDate: Date,from: Int, to: Int, consignee: String, phone: String, weight: Double, isWithin: Boolean)
 
 
-  case class ConsignRecord(id: Int, orderId: Int , accountId: Int , handleDate: Date , targetDate: Date,from: String , to: String , consignee: String, phone: String, weight: Double , price: Double)
+  case class ConsignRecord(id: Int, orderId: Int , accountId: Int , handleDate: Date , targetDate: Date,from: Int , to: Int , consignee: String, phone: String, weight: Double , price: Double)
   case class OrderTicketsResult(status: Boolean,message: String,order: Order)
 
   class InsertConsignRecordResult ( status: Boolean,  message: String)
@@ -247,14 +248,15 @@ num:Int)
 
 
   case class Money (userId: Int, money: Double)
+ case class Money2 (userId: Int, money: Double, var moneyType: (String, Int) = null)
 
   case class AccountInfo (userId: Int, money: Double)
 
 
 
-  class Balance ( userId: Int,  balance: Double)
+ case class Balance ( userId: Int,  balance: Double)
  final case class MoneyType (A: (String,Int)=("Add Money",1),D: (String,Int)=("Draw Back Money",2))
-  class Contacts(
+ case class Contacts(
      id: Int,
      accountId: Int,
      name: String,
@@ -429,15 +431,18 @@ num:Int)
   case class UpdateOrder(order: Order) extends Evt
 
   //config service
-  case class Createconfig(info: Config) extends Evt
+  case class CreateConfig(info: Config) extends Evt
 
   case class Update(info: Config) extends Evt
+ case class Update2(index: Int,info: Config) extends Evt
 
   case class Query(name: String) extends Evt
 
   case class Delete(name: String) extends Evt
 
   case class QueryAll() extends Evt
+
+  case class DeleteConfig2(index: Int) extends Evt
  //Rebook
  case class Rebook(info: RebookInfo) extends Evt
  case class PayDifference(info: RebookInfo) extends Evt
@@ -450,6 +455,7 @@ num:Int)
  case class DrawBack( userId: Int,  money: Double) extends Evt
  case class PayDifference2( info: PaymentInfo) extends Evt
  case class QueryAddMoney( ) extends Evt
+ case class SavePayment(payment: Payment2) extends Evt
  
  //price Service
  case class CreateNewPriceConfig(priceConfig: PriceConfig) extends Evt
@@ -468,7 +474,7 @@ num:Int)
  //admin service
  case class GetAllContacts() extends Evt
 
- case class AddContact(c: Contacts) extends Evt
+ case class AddContact(contact: Contacts) extends Evt
 
  case class DeleteContact(contactsId: Int) extends Evt
 
@@ -576,7 +582,63 @@ case class CreateAssurance(typeIndex: Int, orderId: Int) extends Evt
  case class CancelOrder2(orderId: Int)
 
  //Notification service
- case class SendNotification(notifyInfo: NotifyInfo)
+ case class SendNotification(notifyInfo: NotifyInfo) extends Evt
+
+ // Consignprice service
+ case class GetPriceByWeightAndRegion(weight: Double, isWithinRegion: Boolean) extends Evt
+
+ case class QueryPriceInformation() extends Evt
+
+ case class CreateAndModifyPrice(config: ConsignPrice) extends Evt
+
+ case class GetPriceConfig() extends Evt
+
+ // consign service
+ case class InsertConsignRecord(consignRequest: Consign)  extends Evt
+ case class InsertConsignRecord2(consignRecord: ConsignRecord)  extends Evt
+
+ case class UpdateConsignRecord(consignRequest: Consign)  extends Evt
+
+ case class QueryByAccountId(accountId: Int)  extends Evt
+
+ case class QueryByOrderId(orderId: Int)  extends Evt
+
+ case class QueryByConsignee(consignee: String)  extends Evt
+
+ //Contacts service
+ case class FindContactsById(id: Int)  extends Evt
+
+ case class FindContactsByAccountId(accountId: Int)  extends Evt
+
+
+// FoodMap service
+ case class CreateFoodStore(fs: FoodStore ) extends Evt
+
+ case class CreateTrainFood(tf: TrainFood ) extends Evt
+
+ case class ListFoodStores( ) extends Evt
+
+ case class ListTrainFood( ) extends Evt
+
+ case class ListFoodStoresByStationId(stationId: Int ) extends Evt
+
+ case class ListTrainFoodByTripId(tripId: Int ) extends Evt
+
+ case class GetFoodStoresByStationIds(stationIds: List[Int] ) extends Evt
+ 
+ // food service 
+ case class CreateFoodOrder(afoi: FoodOrder) extends Evt
+
+ case class DeleteFoodOrder(orderId: Int) extends Evt
+
+ case class FindByOrderId(orderId: Int) extends Evt
+
+ case class UpdateFoodOrder(updateFoodOrder: FoodOrder) extends Evt
+
+ case class FindAllFoodOrder() extends Evt
+
+ case class GetAllFood(date: Date, startStation: String, endStation: String, tripId: Int) extends Evt
+ 
 
 
 }

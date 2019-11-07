@@ -51,14 +51,20 @@ object TSPaymentService {
         state = PaymentRepository(state.moneys + (c.payment.userId -> Money(c.payment.userId,c.payment.price+userPreviousSum)),state.payments)
       case c: InitPayment =>
         state = PaymentRepository(state.moneys,state.payments + (c.payment.Id -> c.payment))
+      case c: Pay =>
+        state = PaymentRepository(state.moneys,state.payments  + (c.info.orderId -> Payment(-1,c.info.orderId,c.info.userId,c.info.price)))
+
     }
 
     override def receiveCommand: Receive = {
       case c:Pay =>
         state.payments.get(c.info.orderId) match {
           case Some(_) =>
+            sender() ! Response(1, "Error: Payment already exists",None )
 
           case None =>
+            persist(c)(updateState)
+            sender() ! Response(0, "Success: Payment added",None )
         }
 
 
@@ -73,8 +79,11 @@ object TSPaymentService {
       case c:InitPayment =>
         state.payments.get(c.payment.Id) match {
           case Some(_)=> // do nothing
+            sender() ! Response(1, "Error: Payment already exists",None )
           case None =>
             persist(c)(updateState)
+            sender() ! Response(0, "Success: Payment added",None )
+
         }
 
     }

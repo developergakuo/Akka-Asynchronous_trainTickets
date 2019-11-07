@@ -1,5 +1,4 @@
 import TSCommon.Commons.{Response, _}
-import akka.actor.ActorRef
 import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotOffer}
 import akka.util.Timeout
 
@@ -12,11 +11,7 @@ object TSPriceService {
 
   class PriceService extends PersistentActor {
     var state: PriceConfigRepository = PriceConfigRepository(Map())
-    var routeService: ActorRef = null
-    var trainService: ActorRef = null
-    var trainTicketInfoService: ActorRef = null
-    var orderService: ActorRef = null
-    var seatService: ActorRef = null
+
 
     override def preStart(): Unit = {
       println("TravelService prestart")

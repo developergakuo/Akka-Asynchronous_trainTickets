@@ -80,6 +80,14 @@ object TSStationService {
         for(stn<- state.stations.values){
           if (stn.name == c.stationName) station = Some(stn)
         }
+        station match {
+          case Some(stn) =>
+            sender() ! Response(0,"Success",stn.id)
+          case None =>
+            sender() ! Response(1,"Error: Station not found",None)
+
+
+        }
 
       case c:QueryForIdBatchStation =>
         var result: List[Int] = List()
@@ -109,7 +117,9 @@ object TSStationService {
         }).map(a=>a.get.name)
        if(stationNames.nonEmpty) sender() ! Response(0, "Success", stationNames)
        else sender() ! Response(1, "Failure", stationNames)
+
     }
+
 
   }
 
