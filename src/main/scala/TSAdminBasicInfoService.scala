@@ -10,7 +10,7 @@ import scala.concurrent._
 import ExecutionContext.Implicits.global
 import scala.util.{Failure, Success}
 
-implicit val timeout: Timeout = 2.seconds
+implicit  val timeout: Timeout = 2.seconds
 
 object TSAdminBasicInfoService {
 

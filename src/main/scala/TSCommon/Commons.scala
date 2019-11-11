@@ -113,27 +113,51 @@ num:Int)
      travelTime: Date,
      accountId: Int,
      contactsName: String,
-   documentType: Int,
-   contactsDocumentNumber: Int,
-   trainNumber: Int,
-     coachNumber: Int,
-   seatClass: Int,
-    seatNumber: Int,
-    var from: Int,
-    var to: Int,
-    var status: Int,
-    price: Double)
+    var documentType: Int = -1,
+    var contactsDocumentNumber: Int = -1,
+    var trainNumber: Int = -1,
+    var coachNumber: Int = -1,
+    var seatClass: Int = -1,
+    var seatNumber: Int = -1,
+    var from: Int = -1,
+    var to: Int = -1,
+    var status: Int = -1,
+    var price: Double = 0.0)
 
   case class OrderTicketsInfo (
+                                contactsId: Int,
+                                tripId: Int,
+                                seatType: Int,
+                                loginToken: String,
+                                accountId: Int,
+                                date: Date,
+                                from: String,
+                                to: String,
+                                assurance: Int)
+
+
+ case class OrderTicketsInfo2(
+    accountId: Int,
     contactsId: Int,
- tripId: Int,
-   eatType: Int,
-    loginToken: String,
-   accountId: Int,
-  date: Date,
-   fro: Int,
-    to: Int,
-    )
+    tripId: Int,
+    seatType : Int,
+    date: Date,
+    from: String,
+    to: String,
+    assurance : Int,
+  //food
+    foodType : Int,
+    stationName : String,
+    storeName: String,
+    foodName : String,
+    foodPrice : Double,
+  //consign
+    handleDate: Date,
+    var consigneeName: String= "",
+    var consigneePhone: String = "",
+    consigneeWeight: Double,
+    isWithin: Boolean
+  )
 
   case class PaymentDifferenceInfo(
      orderId: Int,
@@ -218,8 +242,12 @@ num:Int)
     enableBoughtDateQuery: Boolean,
     enableStateQuery: Boolean)
 
-  case  class Mail ( mailFrom: String, mailto: Int, mailCc: String, mailBcc: String, mailSubject: String, mailContent: String, contentType: String, attachments: List[Any], model: Map[String,Any])
-  case class NotifyInfo(email: String, orderNumber: Int, username: String, startingPlace: Int, endPlace: Int, startingTime: Date, date: Date, seatClass: Int, seatNumber: Int, price: Double)
+ case  class Mail ( mailFrom: String, mailto: String,
+                    var mailCc: String = "",var mailBcc: String = "",
+                    mailSubject: String, var mailContent: String ="",
+                    var contentType: String ="", var attachments: List[Any] = List(),
+                    model: Map[String,Any])
+ case class NotifyInfo(email: String, orderNumber: Int, username: String, startingPlace: Int, endPlace: Int, startingTime: Date, date: Date, seatClass: Int, seatNumber: Int, price: Double)
 
 
 
@@ -236,7 +264,7 @@ num:Int)
   case class PlainAssurance(id: Int, oderId: Int, typeIndex: Int, typeName: String, typePrice: String)
 
   case class AssuranceType(assuranceTypes: List[(Int,String, Double)]= List((1, "Traffic Accident Assurance", 3.0)))
-  case class Consign(id: Int, orderId:Int, accountId: Int, handleDate: Date, targetDate: Date,from: Int, to: Int, consignee: String, phone: String, weight: Double, isWithin: Boolean)
+  case class Consign(var id: Int = -1, orderId:Int, accountId: Int, handleDate: Date, targetDate: Date,from: Int, to: Int, consignee: String, phone: String, weight: Double, isWithin: Boolean)
 
 
   case class ConsignRecord(id: Int, orderId: Int , accountId: Int , handleDate: Date , targetDate: Date,from: Int , to: Int , consignee: String, phone: String, weight: Double , price: Double)
@@ -278,14 +306,14 @@ num:Int)
   case class AllTripFood (trainFoodList: List[TrainFood], foodStoreListMap: Map[String, List[FoodStore]])
   case class TrainFood(id: Int, tripId: Int,foodList: List[Food])
   case class FoodStore(
-     id: Int,
+     var id: Int,
      stationId: Int,
      storeName: String,
      telephone: String,
      businessTime: (Date,Date),
      deliveryFee: Double,
      foodList: List[Food])
-  case class  FoodOrder (id: Int, orderId: String, foodType: Int, stationName: String, storeName: String, foodName: String, price:Double)
+  case class  FoodOrder (var id: Int = -1, orderId: Int, foodType: Int, var stationName: String = "",var  storeName: String = "", var foodName: String = "", price:Double)
   case class Food(foodName: String, price: Double)
   case class SearchCheapestResult(info: RoutePlanInfo)
   case class SearchQuickestResult(info: RoutePlanInfo)
@@ -639,6 +667,17 @@ case class CreateAssurance(typeIndex: Int, orderId: Int) extends Evt
 
  case class GetAllFood(date: Date, startStation: String, endStation: String, tripId: Int) extends Evt
  
+//Notification service
 
+ case class Preserve_success(info: NotifyInfo) extends Evt
+
+ case class Order_create_success(info: NotifyInfo) extends Evt
+
+ case class Order_changed_success(info: NotifyInfo) extends Evt
+
+ case class Order_cancel_success(info: NotifyInfo) extends Evt
+
+ // preserve service
+ case class Preserve(oti: OrderTicketsInfo2) extends Evt
 
 }
