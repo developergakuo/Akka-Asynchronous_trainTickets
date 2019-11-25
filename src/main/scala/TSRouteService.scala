@@ -1,13 +1,13 @@
 import TSCommon.Commons._
 import akka.actor. ActorSelection
 import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotOffer}
-
+import InputData._
 
 object TSRouteService {
 
   case class RouteRepository(routes: Map[Int, Route])
-  class RouteService(stockActor: ActorSelection, paymentsActor: ActorSelection) extends PersistentActor {
-    var state: RouteRepository = RouteRepository(Map())
+  class RouteService extends PersistentActor {
+    var state: RouteRepository = RouteRepository(routes.zipWithIndex.map(a => a._2+1 ->a._1).toMap)
     override def preStart(): Unit = {
       println("RouteRepository prestart")
       super.preStart()
@@ -61,6 +61,7 @@ object TSRouteService {
       case c: GetRouteById =>
         state.routes.get(c.routeId) match {
           case Some(route) =>
+            println("Get RouteByID: Success")
             sender() ! Response(0, "Success", route)
           case None =>
             sender() ! Response(1, "No Route with matching id", None)

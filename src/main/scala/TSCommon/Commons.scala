@@ -1,10 +1,19 @@
 package TSCommon
 
-import java.util.{Date, UUID}
+import java.util.Date
+
+import akka.actor.ActorRef
+import akka.util.Timeout
+
+import scala.concurrent.duration._
+import scala.concurrent.duration.Duration
 
 
 object Commons {
-  trait command
+  val duration: Duration = 20.seconds
+ implicit val timeout: Timeout = 20.seconds
+
+ trait command
   trait Evt
   case class Response (status: Int, msg: String, data: Any)
   case class User(userId: Int, username: String, password: String)
@@ -12,58 +21,26 @@ object Commons {
   case class Route(id: Int, stations: List[Int], distances: List[Int],startStationId: Int,terminalStationId: Int )
   case class Station(id: Int, name: String, stayTime: Int)
   case class AdminTrip(trip: Trip, trainType: TrainType, route: Route)
-  case class Trip( tripId: Int,trainTypeId: Int, routeId: Int, startingTime: Date, startingStationId: Int,
-                   stationsId: Int, terminalStationId: Int)
-  case class Seat (var travelDate: Date = null,
-                   var trainNumber: Int = -1,
-                   var startStation: Int = -1,
-                   var destStation: Int = -1,
-                   var seatType: Int = -1)
-  case class TravelInfo (tripId: Int, trainTypeId: Int, routeId: Int, startingStationId: Int, stationsId: Int,
-                         terminalStationId: Int, startingTime: Date, endTime: Date)
-  case class TravelResult(status: Boolean,
-                          percent: Double,
-                          trainType: TrainType,
-                          prices: Map[String,Double],
-                          message: String)
-
- case class Ticket (seatNo: Int,
-  startStation: Int,
- destStation: Int)
-
-
+  case class Trip( tripId: Int,trainTypeId: Int, routeId: Int, startingTime: Date, startingStationId: Int, stationsId: List[Int], terminalStationId: Int)
+  case class Seat (var travelDate: Date = null, var trainNumber: Int = -1, var startStation: Int = -1, var destStation: Int = -1, var seatType: Int = -1)
+  case class TravelInfo (tripId: Int, trainTypeId: Int, routeId: Int, startingStationId: Int, stationsId: List[Int], terminalStationId: Int, startingTime: Date, endTime: Date)
+  case class TravelResult(status: Boolean, percent: Double, trainType: TrainType, prices: Map[String,Double], message: String)
+  case class Ticket (seatNo: Int, startStation: Int, destStation: Int)
+ //food
+  case class AllTripFood (trainFoodList: List[TrainFood], foodStoreListMap: Map[String, List[FoodStore]])
+  case class TrainFood(id: Int, tripId: Int,foodList: List[Food])
+  case class FoodStore(var id: Int, stationId: Int, storeName: String, telephone: String, businessTime: (Date,Date), deliveryFee: Double, foodList: List[Food])
+  case class FoodOrder (var id: Int = -1, orderId: Int, foodType: Int, var stationName: String = "",var  storeName: String = "", var foodName: String = "", price:Double)
+  case class Food(foodName: String, price: Double)
   case class  AuthDto (userId: Int, userName: String, password: String)
-
-
- case class UserDto (userId: Int, userName:String, password: String, gender: String,
-                       documentType: Int, documentNum: Int, email: String)
-
   case class TransferTravelInfo( fromStationName: String, viaStationName: String, toStationName: String, travelDate: Date, trainType: TrainType)
-
   case class TransferTravelResult ( firstSectionResult: List[TripResponse], secondSectionResult: List[TripResponse])
   case class Travel (trip: Trip, startingPlace: String,endPlace: String, departureTime: Date)
-
-  case class  RoutePlanResultUnit(tripId: Int,
-                                  trainTypeId: Int,
-                                  fromStationName: String,
-                                  toStationName: String,
-                                  stopStations: List[Int],
-                                  priceForSecondClassSeat: Double,
-                                  priceForFirstClassSeat: Double,
-                                  startingTime: Date,
-                                  endTime: Date)
+  case class  RoutePlanResultUnit(tripId: Int, trainTypeId: Int, fromStationName: String, toStationName: String, stopStations: List[Int], priceForSecondClassSeat: Double, priceForFirstClassSeat: Double, startingTime: Date, endTime: Date)
   case class  TravelAdvanceResultUnit(tripId: Int, trainTypeId: Int, fromStationName: String, toStationName: String, stopStations: List[String], priceForSecondClassSeat: Double, numberOfRestTicketSecondClass: Int, priceForFirstClassSeat: Double, numberOfRestTicketFirstClass: Int)
- case class  RoutePlanInfo (  fromStationName: String, toStationName: String, travelDate: Date,
-num:Int)
-
-
+  case class  RoutePlanInfo (fromStationName: String, toStationName: String, travelDate: Date, num:Int)
   case class  SecurityConfig(id: Int, name: String, value: Int, description: String)
-
-  case class Config(
-    name: String,
-     value: Int,
-     description : String
-  )
+  case class Config(name: String, value: Double, description : String)
   case class SeatClass(
     none:(Int,String) =(0, "NoSeat"),
     business:(Int,String)= (1, "GreenSeat"),
@@ -106,34 +83,8 @@ num:Int)
   case class RouteInfo(routeId: Int, startStation: Int, endStation: Int, stationList: List[Int], distanceList: List[Int])
   case class  PriceConfig(id: Int, trainType: Int, routeId: Int, basicPriceRate: Double, firstClassPriceRate: Double)
 
- case  class Order(
-    var id: Int,
-   boughtDate: Date,
-    travelDate: Date,
-     travelTime: Date,
-     accountId: Int,
-     contactsName: String,
-    var documentType: Int = -1,
-    var contactsDocumentNumber: Int = -1,
-    var trainNumber: Int = -1,
-    var coachNumber: Int = -1,
-    var seatClass: Int = -1,
-    var seatNumber: Int = -1,
-    var from: Int = -1,
-    var to: Int = -1,
-    var status: Int = -1,
-    var price: Double = 0.0)
-
-  case class OrderTicketsInfo (
-                                contactsId: Int,
-                                tripId: Int,
-                                seatType: Int,
-                                loginToken: String,
-                                accountId: Int,
-                                date: Date,
-                                from: String,
-                                to: String,
-                                assurance: Int)
+ case  class Order(var id: Int, boughtDate: Date, travelDate: Date, travelTime: Date, accountId: Int, contactsName: String, var documentType: Int = -1, var contactsDocumentNumber: Int = -1, var trainNumber: Int = -1, var coachNumber: Int = -1, var seatClass: Int = -1, var seatNumber: Int = -1, var from: Int = -1, var to: Int = -1, var status: Int = -1, var price: Double = 0.0)
+ case class OrderTicketsInfo (contactsId: Int, tripId: Int, seatType: Int, loginToken: String, accountId: Int, date: Date, from: String, to: String, assurance: Int)
 
 
  case class OrderTicketsInfo2(
@@ -159,112 +110,28 @@ num:Int)
     isWithin: Boolean
   )
 
-  case class PaymentDifferenceInfo(
-     orderId: Int,
-     tripId : Int,
-     userId: Int,
-     price: Double
-    )
+  case class PaymentDifferenceInfo(orderId: Int, tripId : Int, userId: Int, price: Double)
  case class PaymentInfo( userId: Int, orderId: Int, tripId: Int, price: Double)
-
  case class Payment (var Id: Int = -1, orderId: Int, userId: Int, price: Double)
  case class Payment2 (var Id: Int = -1, orderId: Int, userId: Int, price: Double, var paymentType: (String, Int) = null)
-
-
  final case class PaymentType (P:(String,Int) =  ("Payment",1), D:(String,Int)=("Difference",2),O:(String,Int)=("Outside Payment",3),E:(String,Int)=("Difference & Outside Payment",4))
-
-
-
-  case class RebookInfo (
-      loginId: Int,
-     orderId: Int,
-      oldTripId: Int,
-      tripId: Int,
-     seatType: Int,
-      date: Date)
-
-  case class VerifyResult (
-    status: Boolean,
-    message: String
-    )
-
+  case class RebookInfo (loginId: Int, orderId: Int, oldTripId: Int, tripId: Int, seatType: Int, date: Date)
+  case class VerifyResult (status: Boolean, message: String)
  //case class UserDto (userName: String, password: String, gender: Int, documentType: Int, documentNum: Int, email: String)
-
-
-
-
-  case class OrderStatus (NOTPAID:(Int,String) =   (0,"Not Paid"),
-                         PAID: (Int,String)    =  (1,"Paid & Not Collected"),
-                         COLLECTED: (Int,String)  = (2,"Collected"),
-                         CHANGE: (Int,String)   =   (3,"Cancel & Rebook"),
-                         CANCEL: (Int,String)   =   (4,"Cancel"),
-                         REFUNDS: (Int,String)  =  (5,"Refunded"),
-                         USED: (Int,String)     =   (6,"Used"))
-
-  case class Gender (NONE:(Int,String) =   (0,"Null"),
-                     MALE: (Int,String)    =  (1,"Male"),
-                     FEMALE: (Int,String)  = (2,"Female"),
-                     OTHER: (Int,String)   =   (3,"Other"))
-
-
-  case class Account (
-     id: Int,
-     password: String,
-     gender: Int,
-    name: String,
-     documentType: Int,
-     documentNum: Int,
-     email: String
-    )
-
- case class OrderInfo (
-     loginId: Int,
-     travelDateStart: Date,
-     travelDateEnd: Date,
-     boughtDateStart: Date,
-    boughtDateEnd: Date,
-    state: Int,
-    enableTravelDateQuery: Boolean,
-    enableBoughtDateQuery: Boolean,
-     enableStateQuery: Boolean
-  )
-
+ case class OrderStatus (NOTPAID:(Int,String) =   (0,"Not Paid"), PAID: (Int,String)    =  (1,"Paid & Not Collected"), COLLECTED: (Int,String)  = (2,"Collected"), CHANGE: (Int,String)   =   (3,"Cancel & Rebook"), CANCEL: (Int,String)   =   (4,"Cancel"), REFUNDS: (Int,String)  =  (5,"Refunded"), USED: (Int,String)     =   (6,"Used"))
+ case class Gender (NONE:(Int,String) =   (0,"Null"), MALE: (Int,String)    =  (1,"Male"), FEMALE: (Int,String)  = (2,"Female"), OTHER: (Int,String)   =   (3,"Other"))
+ case class Account(userId: Int, userName:String, password: String, gender: String, documentType: Int, documentNum: Int, email: String)
+ case class OrderInfo (loginId: Int, travelDateStart: Date, travelDateEnd: Date, boughtDateStart: Date, boughtDateEnd: Date, state: Int, enableTravelDateQuery: Boolean, enableBoughtDateQuery: Boolean, enableStateQuery: Boolean)
  case  class PriceInfo(id:Int, trainType: Int, routeId: Int, basicPriceRate: Double, firstClassPriceRate: Double)
-
-  case class QueryInfo(
-    loginId: Int,
-    travelDateStart: Date,
-    travelDateEnd: Date,
-    boughtDateStart: Date,
-    boughtDateEnd: Date,
-    state: Int,
-    enableTravelDateQuery: Boolean,
-    enableBoughtDateQuery: Boolean,
-    enableStateQuery: Boolean)
-
- case  class Mail ( mailFrom: String, mailto: String,
-                    var mailCc: String = "",var mailBcc: String = "",
-                    mailSubject: String, var mailContent: String ="",
-                    var contentType: String ="", var attachments: List[Any] = List(),
-                    model: Map[String,Any])
+ case class QueryInfo(loginId: Int, travelDateStart: Date, travelDateEnd: Date, boughtDateStart: Date, boughtDateEnd: Date, state: Int, enableTravelDateQuery: Boolean, enableBoughtDateQuery: Boolean,enableStateQuery: Boolean)
+ case  class Mail ( mailFrom: String, mailto: String, var mailCc: String = "",var mailBcc: String = "", mailSubject: String, var mailContent: String ="", var contentType: String ="", var attachments: List[Any] = List(), model: Map[String,Any])
  case class NotifyInfo(email: String, orderNumber: Int, username: String, startingPlace: Int, endPlace: Int, startingTime: Date, date: Date, seatClass: Int, seatNumber: Int, price: Double)
-
-
-
-  case class OrderAlterInfo (accountId: Int, previousOrderId: Int, loginToken: String, newOrderInfo: Order)
-
-
-
-
-
-
-
-  case class Assurance( id: Int, orderId: Int, assurance: (Int,String, Double))
+ case class OrderAlterInfo (accountId: Int, previousOrderId: Int, loginToken: String, newOrderInfo: Order)
+ case class Assurance( id: Int, orderId: Int, assurance: (Int,String, Double))
  case class AssuranceTypeBean(index: Int, name: String, price: Double)
-  case class PlainAssurance(id: Int, oderId: Int, typeIndex: Int, typeName: String, typePrice: String)
-
-  case class AssuranceType(assuranceTypes: List[(Int,String, Double)]= List((1, "Traffic Accident Assurance", 3.0)))
-  case class Consign(var id: Int = -1, orderId:Int, accountId: Int, handleDate: Date, targetDate: Date,from: Int, to: Int, consignee: String, phone: String, weight: Double, isWithin: Boolean)
+ case class PlainAssurance(id: Int, oderId: Int, typeIndex: Int, typeName: String, typePrice: String)
+ case class AssuranceType(assuranceTypes: List[(Int,String, Double)]= List((1, "Traffic Accident Assurance", 3.0)))
+ case class Consign(var id: Int = -1, orderId:Int, accountId: Int, handleDate: Date, targetDate: Date,from: Int, to: Int, consignee: String, phone: String, weight: Double, isWithin: Boolean)
 
 
   case class ConsignRecord(id: Int, orderId: Int , accountId: Int , handleDate: Date , targetDate: Date,from: Int , to: Int , consignee: String, phone: String, weight: Double , price: Double)
@@ -284,14 +151,7 @@ num:Int)
 
  case class Balance ( userId: Int,  balance: Double)
  final case class MoneyType (A: (String,Int)=("Add Money",1),D: (String,Int)=("Draw Back Money",2))
- case class Contacts(
-     id: Int,
-     accountId: Int,
-     name: String,
-     documentType: Int,
-     documentNumber: Int,
-     phoneNumber: String
-    )
+ case class Contacts(id: Int, accountId: Int, name: String, documentType: Int, documentNumber: Int, phoneNumber: String)
   case class OrderSecurity (orderNumInLastOneHour: Int,orderNumOfValidOrder: Int)
   case class LeftTicketInfo(soldTickets: List[Ticket])
   case class DocumentType(NONE: (Int,String) =   (0,"Null"), ID_CARD: (Int,String)  = (1,"ID Card"), PASSPORT:   (Int,String) =  (2,"Passport"), OTHER:  (Int,String) =      (3,"Other"))
@@ -303,18 +163,7 @@ num:Int)
      userId: Int,
   )
 
-  case class AllTripFood (trainFoodList: List[TrainFood], foodStoreListMap: Map[String, List[FoodStore]])
-  case class TrainFood(id: Int, tripId: Int,foodList: List[Food])
-  case class FoodStore(
-     var id: Int,
-     stationId: Int,
-     storeName: String,
-     telephone: String,
-     businessTime: (Date,Date),
-     deliveryFee: Double,
-     foodList: List[Food])
-  case class  FoodOrder (var id: Int = -1, orderId: Int, foodType: Int, var stationName: String = "",var  storeName: String = "", var foodName: String = "", price:Double)
-  case class Food(foodName: String, price: Double)
+
   case class SearchCheapestResult(info: RoutePlanInfo)
   case class SearchQuickestResult(info: RoutePlanInfo)
   case class  SearchMinStopStations(info: RoutePlanInfo)
@@ -345,14 +194,15 @@ num:Int)
   case class SaveUser(user:User) extends Evt
 
   //userService
-  case class SaveUserDto (userDto: UserDto) extends Evt
+  case class SaveUserDto (userDto: Account) extends Evt
   case class GetAllUsers() extends Evt
   case class  FindByUserName(userName: String)  extends Evt
+  case class  FindByUserName2(userName: String)  extends Evt
   case class FindByUserId(userId: Int)  extends Evt
  case class FindByUserId2(userId: Int)  extends Evt
 
   case class DeleteUser(userId: Int)  extends Evt
-  case class  UpdateUser(user: UserDto)  extends Evt
+  case class  UpdateUser(user: Account)  extends Evt
   case  class CreateDefaultAuthUser(dto: AuthDto) extends Evt
   case class DeleteUserAuth(userId: Int) extends Evt
 
@@ -571,7 +421,7 @@ num:Int)
 
  //case class UpdateUser(userDto: UserDto) extends Evt
 
- case class AddUser(userDto: UserDto) extends Evt
+ case class AddUser(userDto: Account) extends Evt
 
  //case class FindAssuranceById(id: Int) extends Evt
 
@@ -669,15 +519,33 @@ case class CreateAssurance(typeIndex: Int, orderId: Int) extends Evt
  
 //Notification service
 
- case class Preserve_success(info: NotifyInfo) extends Evt
-
- case class Order_create_success(info: NotifyInfo) extends Evt
-
- case class Order_changed_success(info: NotifyInfo) extends Evt
-
- case class Order_cancel_success(info: NotifyInfo) extends Evt
-
+ case class Preserve_success(info: NotifyInfo,receiver: ActorRef ) extends Evt
+ case class Order_create_success(info: NotifyInfo,receiver: ActorRef ) extends Evt
+ case class Order_changed_success(info: NotifyInfo,receiver: ActorRef ) extends Evt
+ case class Order_cancel_success(info: NotifyInfo,receiver: ActorRef ) extends Evt
+ case class  Order_Rebook_success(info: NotifyInfo,receiver: ActorRef) extends Evt
+  case class Order_Paid_success(info: NotifyInfo,receiver: ActorRef) extends Evt
  // preserve service
  case class Preserve(oti: OrderTicketsInfo2) extends Evt
+
+  case class SeatServiceId()
+ //Execute service
+ case class TicketExecute(orderId: Int) extends Evt
+ case class TicketCollect(orderId: Int) extends Evt
+
+  //Client
+  case class ClientLogin(userName: String, password: String) extends Evt
+  case class ClientMakeOrder()extends Evt
+  case class ClientModifyOrder()extends Evt
+  case class ClientCancelOrder(order: Order)extends Evt
+  case class ClientRebook(oldOrder: Order, newTrip: Trip) extends Evt
+  case class ClientPay(order: Order) extends Evt
+  case class ClientPreserve(startingStaion: String, endSation: String, travelDate: Date, seatsCount: Int, seatType: Int, assuranceType: Int =1, foodType: Int = 1) extends Evt
+  case class PreservationSuccess(mail: Mail) extends Evt
+  case class OrderCreated(mail: Mail) extends Evt
+  case class OrderChanged(mail: Mail) extends Evt
+  case class OrderCanceled(mail: Mail) extends Evt
+  case class OrderRebooked(mail: Mail) extends Evt
+  case class OrderPaid(mail: Mail) extends Evt
 
 }

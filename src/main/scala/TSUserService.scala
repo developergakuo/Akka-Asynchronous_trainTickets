@@ -3,21 +3,18 @@ import akka.actor.ActorRef
 import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotOffer}
 import akka.pattern.ask
 import akka.util.Timeout
-
 import scala.concurrent.duration._
 import scala.concurrent.Future
 import scala.concurrent._
 import ExecutionContext.Implicits.global
+import InputData._
 
-implicit val timeout: Timeout = 2.seconds
 import scala.util.{Success, Failure}
 
 object TSUserService {
-  case class UserDtoRepository(users: Map[Int,UserDto])
-  class UserService extends PersistentActor {
-    var state = UserDtoRepository(users = Map())
-    var authService: ActorRef = null
-
+  case class UserDtoRepository(users: Map[Int,Account])
+  class UserService(authService: ActorRef) extends PersistentActor {
+    var state = UserDtoRepository(userDtos.zipWithIndex.map(a => a._2+1 -> a._1).toMap)
     override def preStart(): Unit = {
       println("UserService prestart")
       super.preStart()
@@ -90,6 +87,18 @@ object TSUserService {
         }
         user match {
           case Some(usr)=>
+            sender() ! Response(0,"Success",usr)
+          case None =>
+            sender() ! Response(1,"No user by that userName",None)
+        }
+      case c:FindByUserName2=>
+        var user: Option[Account] = None
+        for (usr<-state.users.values){
+          if(usr.userName == c.userName) user = Some(usr)
+        }
+        user match {
+          case Some(usr)=>
+            println("======== Found-user:  " + usr)
             sender() ! Response(0,"Success",usr)
           case None =>
             sender() ! Response(1,"No user by that userName",None)

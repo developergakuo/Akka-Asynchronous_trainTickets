@@ -5,19 +5,17 @@ import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotO
 import akka.pattern.ask
 import scala.concurrent.duration._
 import scala.concurrent.Future
-import scala.concurrent._
-import ExecutionContext.Implicits.global
-import scala.util.{Failure, Success}
+import scala.concurrent.Await
 
 import akka.util.Timeout
 
-implicit val timeout: Timeout = 2.seconds
 object TSConsignService {
+
   case class ConfigRepository(consigns: Map[Int, ConsignRecord])
 
-  class ConsignService extends PersistentActor {
+  class ConsignService(consignPriceService: ActorRef ) extends PersistentActor {
     var state: ConfigRepository = ConfigRepository(Map())
-    var consignPriceService: ActorRef = null
+
 
     override def preStart(): Unit = {
       println("TravelService prestart")
@@ -56,13 +54,9 @@ object TSConsignService {
 
           case None =>
             var price: Option[Double]= None
-            val response: Future[Any] = consignPriceService ? GetPriceByWeightAndRegion(c.consignRequest.weight,c.consignRequest.isWithin)
-            response onComplete {
-              case Success(res) =>
-                if (res.asInstanceOf[Response].status == 0) price =Some(res.asInstanceOf[Response].data.asInstanceOf[Double])
-              case Failure(_) =>
-                price = None
-            }
+            val responseFuture: Future[Any] = consignPriceService ? GetPriceByWeightAndRegion(c.consignRequest.weight,c.consignRequest.isWithin)
+            val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+            if (response.status == 0) price =Some(response.data.asInstanceOf[Double])
             price match {
               case Some(prix) =>
                 val consignRecord = ConsignRecord(c.consignRequest.id,c.consignRequest.orderId,c.consignRequest.accountId,c.consignRequest.handleDate,
@@ -78,13 +72,9 @@ object TSConsignService {
         state.consigns.get(c.consignRequest.id) match{
           case Some(_) =>
             var price: Option[Double]= None
-            val response: Future[Any] = consignPriceService ? GetPriceByWeightAndRegion(c.consignRequest.weight,c.consignRequest.isWithin)
-            response onComplete {
-              case Success(res) =>
-                if (res.asInstanceOf[Response].status == 0) price =Some(res.asInstanceOf[Response].data.asInstanceOf[Double])
-              case Failure(_) =>
-                price = None
-            }
+            val responseFuture: Future[Any] = consignPriceService ? GetPriceByWeightAndRegion(c.consignRequest.weight,c.consignRequest.isWithin)
+            val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+            if (response.status == 0) price =Some(response.data.asInstanceOf[Double])
             price match {
               case Some(prix) =>
                 val consignRecord = ConsignRecord(c.consignRequest.id,c.consignRequest.orderId,c.consignRequest.accountId,c.consignRequest.handleDate,

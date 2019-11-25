@@ -5,7 +5,8 @@ object TSConfigService {
   case class ConfigRepository(configs: ListBuffer[Config])
 
   class ConfigService extends PersistentActor {
-    var state: ConfigRepository = ConfigRepository(ListBuffer())
+    var state: ConfigRepository = ConfigRepository(ListBuffer(Config("DirectTicketAllocationProportion",0.5,
+      "Allocation Proportion Of The Direct Ticket - From Start To End")))
 
     override def preStart(): Unit = {
       println("TravelService prestart")

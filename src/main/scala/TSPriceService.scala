@@ -1,16 +1,12 @@
 import TSCommon.Commons.{Response, _}
 import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotOffer}
 import akka.util.Timeout
-
-import scala.concurrent.duration._
-
-implicit val timeout: Timeout = 2.seconds
+import InputData._
 
 object TSPriceService {
   case class PriceConfigRepository(configs: Map[Int, PriceConfig])
-
   class PriceService extends PersistentActor {
-    var state: PriceConfigRepository = PriceConfigRepository(Map())
+    var state: PriceConfigRepository = PriceConfigRepository(priceConfigs.zipWithIndex.map(a=>a._2+1 -> a._1).toMap)
 
 
     override def preStart(): Unit = {
@@ -45,7 +41,7 @@ object TSPriceService {
 
       case c: UpdatePriceConfig =>
         state = PriceConfigRepository(state.configs + (c.priceConfig.id -> c.priceConfig))
-      case c: UpdatePriceConfig =>
+      case c: DeletePriceConfig =>
         state = PriceConfigRepository(state.configs - c.priceConfig.id)
 
     }
@@ -69,12 +65,14 @@ object TSPriceService {
             sender() ! Response(1, "No priceConfig found", None)
         }
       case c:FindByRouteIdAndTrainType =>
+        println("===========PriceService: ")
         var config:Option[PriceConfig] = None
         for (config1 <-state.configs.values){
           if(config1.routeId == c.routeId && config1.trainType== c.trainType)  config = Some(config1)
         }
         config match {
           case Some(config1) =>
+            println("===========PriceService: success")
             sender() ! Response(0,"Success", config1)
           case None =>
         sender() ! Response(1,"Failure: No matching config", config)

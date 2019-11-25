@@ -6,25 +6,18 @@ import akka.util.Timeout
 
 import scala.concurrent.duration._
 import scala.concurrent.Future
-import scala.concurrent._
-import ExecutionContext.Implicits.global
+import scala.concurrent.Await
 import scala.util.{Failure, Random, Success}
-import java.util.Date
 
-import TSCommon.Commons
 
-implicit val timeout: Timeout = 2.seconds
 
 object TSSeatService {
+
   case class SecurityRepository(configs: Map[Int, SecurityConfig])
 
-  class SeatService extends PersistentActor {
+  class SeatService (orderService: ActorRef , orderOtherService: ActorRef , configService: ActorRef,
+                     routeService: ActorRef,trainService: ActorRef)extends PersistentActor {
     var state: SecurityRepository = SecurityRepository(Map())
-    var orderService: ActorRef = null
-    var orderOtherService: ActorRef = null
-    var configService: ActorRef = null
-    var travelService: ActorRef = null
-    var travel2Service: ActorRef = null
 
 
     override def preStart(): Unit = {
@@ -67,63 +60,55 @@ object TSSeatService {
 
     override def receiveCommand: Receive = {
       case c:DistributeSeat =>
+        println("***************** DistributeSeat")
         var routeResult: Option[Route] = None
         var trainTypeResult:Option[TrainType] = None
         var leftTicketInfo: Option[LeftTicketInfo] = None
         val trainNumber = c.seat.trainNumber
         if (trainNumber == 1 || trainNumber == 2) {
-
-          val response: Future[Any] = travelService ? GetRouteById(c.seat.trainNumber)
-          response onComplete {
-            case Success(resp: Response) =>
-              if (resp.status == 0) routeResult = Some(resp.data.asInstanceOf[Route])
-            case Failure(_) =>
-              routeResult = None
+          val responseFuture: Future[Any] = routeService ? GetRouteById(c.seat.trainNumber)
+          val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+          if (response.status == 0){
+            println("***************** DistributeSeat: route Success")
+            routeResult = Some(response.data.asInstanceOf[Route])
           }
 
-          val response2: Future[Any] = orderService ? GetSoldTickets(c.seat)
-          response2 onComplete {
-            case Success(resp: Response) =>
-              if (resp.status == 0) leftTicketInfo = Some(resp.data.asInstanceOf[LeftTicketInfo])
-            case Failure(_) =>
-              leftTicketInfo = None
+          val response2Future: Future[Any] = orderService ? GetSoldTickets(c.seat)
+          val response2 = Await.result(response2Future,duration).asInstanceOf[Response]
+          if (response2.status == 0) {
+            println("***************** DistributeSeat: LeftTicket Success")
+            leftTicketInfo = Some(response2.data.asInstanceOf[LeftTicketInfo])
           }
 
-          val response3: Future[Any] = travelService ? GetTrainTypeByTripId(c.seat.trainNumber)
-          response3 onComplete {
-            case Success(resp: Response) =>
-              if (resp.status == 0) trainTypeResult = Some(resp.data.asInstanceOf[TrainType])
-            case Failure(_) =>
-              trainTypeResult = None
-          }
+          val response3Future: Future[Any] = trainService ? RetrieveTrain(c.seat.trainNumber)
+          val response3 = Await.result(response3Future,duration).asInstanceOf[Response]
+          if (response3.status == 0) trainTypeResult = Some(response3.data.asInstanceOf[TrainType])
         }
         else {
-
-          val response: Future[Any] = travel2Service ? GetRouteById(c.seat.trainNumber)
-          response onComplete {
-            case Success(resp: Response) =>
-              if (resp.status == 0) routeResult = Some(resp.data.asInstanceOf[Route])
-            case Failure(_) =>
-              routeResult = None
+          val responseFuture: Future[Any] = routeService ? GetRouteById(c.seat.trainNumber)
+          val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+          if (response.status == 0){
+            println("***************** DistributeSeat: route Success")
+            routeResult = Some(response.data.asInstanceOf[Route])
           }
 
-          val response2: Future[Any] = orderOtherService ? GetSoldTickets(c.seat)
-          response2 onComplete {
-            case Success(resp: Response) =>
-              if (resp.status == 0) leftTicketInfo = Some(resp.data.asInstanceOf[LeftTicketInfo])
-            case Failure(_) =>
-              leftTicketInfo = None
+          val response2Future: Future[Any] = orderOtherService ? GetSoldTickets(c.seat)
+          val response2 = Await.result(response2Future,duration).asInstanceOf[Response]
+          if (response2.status == 0){
+            println("***************** DistributeSeat: solTickets Success")
+            leftTicketInfo = Some(response2.data.asInstanceOf[LeftTicketInfo])
           }
 
-          val response3: Future[Any] = travel2Service ? GetTrainTypeByTripId(c.seat.trainNumber)
-          response3 onComplete {
-            case Success(resp: Response) =>
-              if (resp.status == 0) trainTypeResult = Some(resp.data.asInstanceOf[TrainType])
-            case Failure(_) =>
-              trainTypeResult = None
+          val response3Future: Future[Any] = trainService ? RetrieveTrain(c.seat.trainNumber)
+          val response3 = Await.result(response3Future,duration).asInstanceOf[Response]
+          if (response3.status == 0) {
+            println("***************** DistributeSeat: trainType Success")
+            trainTypeResult = Some(response3.data.asInstanceOf[TrainType])
           }
+
         }
         val stationList = routeResult.get.stations
+
         var seatTotalNum = 0
         if (c.seat.seatType == SeatClass().firstClass._1) {
           seatTotalNum = trainTypeResult.get.comfortClass
@@ -137,77 +122,61 @@ object TSSeatService {
         var seat = rand.nextInt(range) + 1
        leftTicketInfo match {
          case Some(lti) =>
+           val ticket = Ticket(seat,startStation,c.seat.destStation)
           val soldTickets = lti.soldTickets
-          for (soldTicket <- soldTickets) {
-            val soldTicketDestStation = soldTicket.destStation
-            if (stationList.indexOf(soldTicketDestStation) < stationList.indexOf(startStation)) {
-              sender() ! Response(0, "Use a new seat number!", Ticket(seat,startStation,c.seat.destStation))
-            }
+          if  (soldTickets.contains(ticket)) {
+            sender() ! Response(1,"Error: Seat Already taken", None)
           }
-          while ( {
-            isContained(soldTickets, seat)
-          }) seat = rand.nextInt(range) + 1
+          else
+            sender() ! Response(0,"Success: Seat preserved", ticket)
 
          case None => // Do nothing
+           sender() ! Response(1,"Error: Fetching soldTickets", None)
        }
 
       case c:GetLeftTicketOfInterval =>
+        println("SeatService: GetLeftTicketOfInterval: Begin")
         var numOfLeftTicket = 0
         var routeResult: Option[Route] = None
         var trainTypeResult:Option[TrainType] = None
         var leftTicketInfo: Option[LeftTicketInfo] = None
         val trainNumber = c.seat.trainNumber
         if (trainNumber == 1 || trainNumber == 2) {
+          println("SeatService: GetLeftTicketOfInterval Begin: HighSpeed")
+          println("SeatService: GetLeftTicketOfInterval Begin: HighSpeed")
+          val responseFuture: Future[Any] = routeService ? GetRouteById(c.seat.trainNumber)
+          val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+          if (response.status == 0) {
+            println("SeatService: GetLeftTicketOfInterval: HighSpeed: Route")
+            routeResult = Some(response.data.asInstanceOf[Route])}
 
-          val response: Future[Any] = travelService ? GetRouteById(c.seat.trainNumber)
-          response onComplete {
-            case Success(resp: Response) =>
-              if (resp.status == 0) routeResult = Some(resp.data.asInstanceOf[Route])
-            case Failure(_) =>
-              routeResult = None
+          val response2Future: Future[Any] = orderService ? GetSoldTickets(c.seat)
+          val response2 = Await.result(response2Future,duration).asInstanceOf[Response]
+          if (response2.status == 0) {
+            println("SeatService: GetLeftTicketOfInterval: HighSpeed: LeftTickets")
+
+            leftTicketInfo = Some(response2.data.asInstanceOf[LeftTicketInfo])
           }
 
-          val response2: Future[Any] = orderService ? GetSoldTickets(c.seat)
-          response2 onComplete {
-            case Success(resp: Response) =>
-              if (resp.status == 0) leftTicketInfo = Some(resp.data.asInstanceOf[LeftTicketInfo])
-            case Failure(_) =>
-              leftTicketInfo = None
-          }
-
-          val response3: Future[Any] = travelService ? GetTrainTypeByTripId(c.seat.trainNumber)
-          response3 onComplete {
-            case Success(resp: Response) =>
-              if (resp.status == 0) trainTypeResult = Some(resp.data.asInstanceOf[TrainType])
-            case Failure(_) =>
-              trainTypeResult = None
-          }
+          val response3Future: Future[Any] = trainService ? RetrieveTrain(c.seat.trainNumber)
+          val response3 = Await.result(response3Future,duration).asInstanceOf[Response]
+          if (response3.status == 0) trainTypeResult = Some(response3.data.asInstanceOf[TrainType])
         }
         else {
+          println("SeatService: GetLeftTicketOfInterval: LowSpeed")
+          val responseFuture: Future[Any] = routeService ? GetRouteById(c.seat.trainNumber)
+          val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+          if (response.status == 0) routeResult = Some(response.data.asInstanceOf[Route])
 
-          val response: Future[Any] = travel2Service ? GetRouteById(c.seat.trainNumber)
-          response onComplete {
-            case Success(resp: Response) =>
-              if (resp.status == 0) routeResult = Some(resp.data.asInstanceOf[Route])
-            case Failure(_) =>
-              routeResult = None
+          val response2Future: Future[Any] = orderOtherService ? GetSoldTickets(c.seat)
+          val response2 = Await.result(response2Future,duration).asInstanceOf[Response]
+          if (response2.status == 0) {
+            leftTicketInfo = Some(response2.data.asInstanceOf[LeftTicketInfo])
           }
 
-          val response2: Future[Any] = orderOtherService ? GetSoldTickets(c.seat)
-          response2 onComplete {
-            case Success(resp: Response) =>
-              if (resp.status == 0) leftTicketInfo = Some(resp.data.asInstanceOf[LeftTicketInfo])
-            case Failure(_) =>
-              leftTicketInfo = None
-          }
-
-          val response3: Future[Any] = travel2Service ? GetTrainTypeByTripId(c.seat.trainNumber)
-          response3 onComplete {
-            case Success(resp: Response) =>
-              if (resp.status == 0) trainTypeResult = Some(resp.data.asInstanceOf[TrainType])
-            case Failure(_) =>
-              trainTypeResult = None
-          }
+          val response3Future: Future[Any] = trainService ? RetrieveTrain(c.seat.trainNumber)
+          val response3 = Await.result(response3Future,duration).asInstanceOf[Response]
+          if (response3.status == 0) trainTypeResult = Some(response3.data.asInstanceOf[TrainType])
         }
         val stationList = routeResult.get.stations
         var seatTotalNum = 0
@@ -232,7 +201,6 @@ object TSSeatService {
           case None => // Do nothing
 
         }
-
         var direstPart = getDirectProportion()
         val route = routeResult.get
         if (route.stations.head.equals(c.seat.startStation) && route.stations.last.equals(c.seat.destStation)) {
@@ -241,10 +209,8 @@ object TSSeatService {
         else direstPart = 1.0 - direstPart
         val unusedNum = (seatTotalNum * direstPart).toInt - solidTicketSize
         numOfLeftTicket += unusedNum
+        println("SeatService: GetLeftTicketOfInterval: success")
         sender() ! Response(0, "Success", numOfLeftTicket)
-
-
-
 
     }
 
@@ -256,19 +222,12 @@ object TSSeatService {
       result
     }
 
-
-
     private def getDirectProportion(configName: String = ""): Double= {
       val configName = "DirectTicketAllocationProportion"
       var result: Option[Double] = None
-      val response: Future[Any] = configService ? Query(configName)
-      response onComplete {
-        case Success(res) =>
-          if (res.asInstanceOf[Response].status == 0) result = Some(res.asInstanceOf[Response].data.asInstanceOf[Config].value)
-          else result = None
-        case Failure(_) =>
-          result = None
-      }
+      val responseFuture: Future[Any] = configService ? Query(configName)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if (response.status == 0) result = Some(response.data.asInstanceOf[Config].value)
       result.get
     }
   }

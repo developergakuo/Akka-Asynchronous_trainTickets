@@ -1,11 +1,11 @@
 import TSCommon.Commons._
-
+import InputData._
 import akka.persistence._
 object TSAuthService {
   case class UsersRepository(users: Map[Int,User])
 
-  class UserService extends PersistentActor {
-    var state = UsersRepository(users = Map())
+  class AuthService extends PersistentActor {
+    var state = UsersRepository(users.zipWithIndex.map(a=>a._2 + 1->a._1).toMap)
 
     override def preStart(): Unit = {
       println("Client prestart")

@@ -1,10 +1,10 @@
 import TSCommon.Commons._
 import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotOffer}
-
+import InputData._
 object TSStationService {
   case class StationRepository(stations:Map[Int,Station])
   class StationService extends PersistentActor {
-    var state = StationRepository(stations = Map())
+    var state = StationRepository(stations = stations.zipWithIndex.map(a=> a._2+1 -> a._1).toMap)
     override def preStart(): Unit = {
       println("StationService prestart")
       super.preStart()
@@ -76,12 +76,14 @@ object TSStationService {
         sender() ! Response(0,"Success",state.stations.values.toList)
 
       case c:QueryForIdStation =>
+        println("=================stationService:QueryForIdStation " + c.stationName)
         var station: Option[Station] = None
         for(stn<- state.stations.values){
           if (stn.name == c.stationName) station = Some(stn)
         }
         station match {
           case Some(stn) =>
+            println("=================stationService:QueryForIdStation: Success " + c.stationName)
             sender() ! Response(0,"Success",stn.id)
           case None =>
             sender() ! Response(1,"Error: Station not found",None)

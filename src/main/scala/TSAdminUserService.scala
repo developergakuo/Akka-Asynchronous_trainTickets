@@ -9,21 +9,19 @@ import scala.concurrent._
 import ExecutionContext.Implicits.global
 import scala.util.{Failure, Success}
 
-implicit val timeout: Timeout = 2.seconds
 
 object TSAdminUserService {
 
-  class AdminUserService extends Actor {
 
-    var userService: ActorRef = null
+  class AdminUserService(userService: ActorRef) extends Actor {
 
     override def receive: Receive = {
-      case c:GetAllUsers =>
-        var users: Option[List[UserDto]] = None
-        val response: Future[Any] = userService ? UserDto
+      case GetAllUsers =>
+        var users: Option[List[Account]] = None
+        val response: Future[Any] = userService ? Account
         response onComplete {
           case Success(res) =>
-            if (res.asInstanceOf[Response].status == 0) users = Some(res.asInstanceOf[Response].data.asInstanceOf[List[UserDto]])
+            if (res.asInstanceOf[Response].status == 0) users = Some(res.asInstanceOf[Response].data.asInstanceOf[List[Account]])
             else users = None
           case Failure(_) =>
             users = None

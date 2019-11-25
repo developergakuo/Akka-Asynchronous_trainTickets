@@ -1,7 +1,7 @@
 
 import TSCommon.Commons._
 import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotOffer}
-
+import InputData._
 object TSTrainService {
 
 
@@ -9,7 +9,7 @@ object TSTrainService {
   case class TrainRepository(trains: Map[Int, TrainType])
 
   class TrainService extends PersistentActor {
-    var state: TrainRepository = TrainRepository(Map())
+    var state: TrainRepository = TrainRepository(trains.zipWithIndex.map(a=>a._2+1 -> a._1).toMap)
 
     override def preStart(): Unit = {
       println("TravelService prestart")
@@ -34,7 +34,6 @@ object TSTrainService {
       case x: Evt ⇒
         println("recovering: " + x)
         updateState(x)
-
     }
 
     def updateState(evt: Evt): Unit = evt match {
@@ -79,7 +78,6 @@ object TSTrainService {
 
       case QueryTrains() =>
         sender() ! Response(0,"Success",state.trains.values.toList)
-
     }
 
   }

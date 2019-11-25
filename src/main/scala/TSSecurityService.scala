@@ -6,20 +6,18 @@ import akka.util.Timeout
 
 import scala.concurrent.duration._
 import scala.concurrent.Future
-import scala.concurrent._
-import ExecutionContext.Implicits.global
-import scala.util.{Failure, Success}
+import scala.concurrent.Await
 import java.util. Date
 
-implicit val timeout: Timeout = 2.seconds
 
 object TSSecurityService {
+
   case class SecurityRepository(configs: Map[Int, SecurityConfig])
 
-  class SecurityService extends PersistentActor {
-    var state: SecurityRepository = SecurityRepository(Map())
-    var orderService: ActorRef = null
-    var orderOtherService: ActorRef = null
+  class SecurityService(orderService: ActorRef, orderOtherService: ActorRef) extends PersistentActor {
+    var state: SecurityRepository = SecurityRepository(Map(0->SecurityConfig(0,"max_order_1_hour",50,"max orders unpaid per hour"),
+      1->SecurityConfig(1,"max_order_not_use",50,"max orders not in use in the last hour")))
+
 
     override def preStart(): Unit = {
       println("TravelService prestart")
@@ -100,34 +98,25 @@ object TSSecurityService {
         val oneHourLine = configMaxInHour
         val totalValidLine = configMaxNotUse
         if (orderInOneHour > oneHourLine || totalValidOrder > totalValidLine) sender()  !  Response(1, "Too much order in last one hour or too much valid order", c.accountId)
-        else sender() ! Response(0, "Success", c.accountId)
-
-
+        else {
+          println("orders secure")
+          sender() ! Response(0, "Success", c.accountId)
+        }
     }
 
     def getSecurityOrderInfoFromOrder(checkDate: Date, accountId: Int): OrderSecurity ={
       var orderSecurity: Option[OrderSecurity] = None
-      val response: Future[Any] = orderService ? CheckSecurityAboutOrder(checkDate,accountId)
-      response onComplete {
-        case Success(res) =>
-          if (res.asInstanceOf[Response].status == 0) orderSecurity = Some(res.asInstanceOf[Response].data.asInstanceOf[OrderSecurity])
-          else orderSecurity = None
-        case Failure(_) =>
-          orderSecurity = None
-      }
+      val responseFuture: Future[Any] = orderService ? CheckSecurityAboutOrder(checkDate,accountId)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if (response.status == 0) orderSecurity = Some(response.data.asInstanceOf[OrderSecurity])
       orderSecurity.get
     }
 
     def getSecurityOrderOtherInfoFromOrder(checkDate: Date, accountId: Int): OrderSecurity = {
       var orderSecurity: Option[OrderSecurity] = None
-      val response: Future[Any] = orderOtherService ? CheckSecurityAboutOrder(checkDate,accountId)
-      response onComplete {
-        case Success(res) =>
-          if (res.asInstanceOf[Response].status == 0) orderSecurity = Some(res.asInstanceOf[Response].data.asInstanceOf[OrderSecurity])
-          else orderSecurity = None
-        case Failure(_) =>
-          orderSecurity = None
-      }
+      val responseFuture: Future[Any] = orderOtherService ? CheckSecurityAboutOrder(checkDate,accountId)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if (response.status == 0) orderSecurity = Some(response.data.asInstanceOf[OrderSecurity])
       orderSecurity.get
     }
 

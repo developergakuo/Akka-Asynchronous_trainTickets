@@ -1,26 +1,19 @@
-
 import TSCommon.Commons.{Response, _}
 import akka.actor.ActorRef
 import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotOffer}
-import akka.util.Timeout
 import akka.pattern.ask
-import scala.concurrent.duration._
 import scala.concurrent.Future
-import scala.concurrent._
-import ExecutionContext.Implicits.global
-import scala.util.{Success, Failure}
+import scala.concurrent.Await
+import java.util.Calendar
+import InputData.{exampleOtherOrder,exampleOtherOrderUnpaid}
+import scala.collection.mutable.ListBuffer
 
-implicit val timeout: Timeout = 2.seconds
 
 
 object TSOrderOtherService {
-
   case class orderRepository(orders: Map[Int, Order])
-
-  class OrderOtherService extends PersistentActor {
-    var state: orderRepository = orderRepository(Map())
-    var stationService: ActorRef = null
-
+  class OrderOtherService( stationService: ActorRef) extends PersistentActor {
+    var state: orderRepository = orderRepository(Map(1->exampleOtherOrder,2->exampleOtherOrderUnpaid))
     override def preStart(): Unit = {
       println("TravelService prestart")
       super.preStart()
@@ -70,7 +63,7 @@ object TSOrderOtherService {
             sender() ! Response(1, "Order with that id exists", None)
           case None =>
             persist(c)(updateState)
-            Response(0, "Success", None)
+            sender() ! Response(0, "Success", c.newOrder)
         }
       case c:SaveChanges =>
         state.orders.get(c.order.id) match {
@@ -112,9 +105,6 @@ object TSOrderOtherService {
           i = 1+1
         }
         sender() !  Response(1, "Query Orders For Refresh Success", orders)
-
-
-
       case c: AlterOrder =>
         state.orders.get(c.oai.previousOrderId) match {
           case Some(order) =>
@@ -122,7 +112,7 @@ object TSOrderOtherService {
             tempOrder.status = OrderStatus().CANCEL._1
             saveChanges(tempOrder)
             val newOrder = c.oai.newOrderInfo
-            newOrder.id = scala.util.Random(10000000)
+            newOrder.id = scala.util.Random.nextInt(10000000)
             state.orders.get(newOrder.id) match {
               case Some(_) =>
                 sender() ! Response(1, "Alter Order: Order with that id exists", None)
@@ -133,6 +123,20 @@ object TSOrderOtherService {
           case None =>
             sender() ! Response(1, "Old order does not exist", None)
         }
+      case c:GetSoldTickets =>
+          val list = state.orders.values.filter(ord => ord.travelDate == c.seat.travelDate)
+          if (list.nonEmpty) {
+            val ticketSet: ListBuffer[Ticket] = ListBuffer()
+            for (tempOrder <- list) {
+              ticketSet.+=( Ticket(tempOrder.seatNumber, tempOrder.from, tempOrder.to))
+            }
+            val leftTicketInfo =LeftTicketInfo(ticketSet.toList)
+            sender() ! Response(0, "Success", leftTicketInfo)
+          }
+          else {
+            System.out.println("Left ticket info is empty")
+            sender() ! Response(0, "Order is Null.", LeftTicketInfo(List()))
+          }
 
       case c: QueryAlreadySoldOrders =>
         val cstr = SoldTicket(travelDate = c.travelDate,trainNumber = c.trainNumber)
@@ -140,28 +144,30 @@ object TSOrderOtherService {
           if ((order.trainNumber == c.trainNumber) && (order.travelDate == c.travelDate)) {
             if (order.status >= OrderStatus().CHANGE._1)
               if (order.seatClass == SeatClass().none._1) cstr.noSeat = cstr.noSeat + 1
-              else if (order.seatClass == SeatClass().business._1) cstr.businessSeat(cstr.businessSeat + 1)
-              else if (order.seatClass == SeatClass().firstClass._1) cstr.firstClassSeat(cstr.firstClassSeat + 1)
-              else if (order.seatClass == SeatClass().secondClass._1) cstr.secondClassSeat(cstr.secondClassSeat + 1)
-              else if (order.seatClass == SeatClass().hardSeat._1) cstr.hardSeat(cstr.hardSeat + 1)
-              else if (order.seatClass == SeatClass().softSeat._1) cstr.softSeat(cstr.softSeat + 1)
-              else if (order.seatClass == SeatClass().hardBed._1) cstr.hardBed(cstr.hardBed + 1)
-              else if (order.seatClass == SeatClass().softBed._1) cstr.softBed(cstr.softBed + 1)
-              else if (order.seatClass == SeatClass().highSoftBed._1) cstr.highSoftBed(cstr.highSoftBed + 1)
+              else if (order.seatClass == SeatClass().business._1) cstr.businessSeat=cstr.businessSeat + 1
+              else if (order.seatClass == SeatClass().firstClass._1) cstr.firstClassSeat =cstr.firstClassSeat + 1
+              else if (order.seatClass == SeatClass().secondClass._1) cstr.secondClassSeat = cstr.secondClassSeat + 1
+              else if (order.seatClass == SeatClass().hardSeat._1) cstr.hardSeat =cstr.hardSeat + 1
+              else if (order.seatClass == SeatClass().softSeat._1) cstr.softSeat = cstr.softSeat + 1
+              else if (order.seatClass == SeatClass().hardBed._1) cstr.hardBed =cstr.hardBed + 1
+              else if (order.seatClass == SeatClass().softBed._1) cstr.softBed =cstr.softBed + 1
+              else if (order.seatClass == SeatClass().highSoftBed._1) cstr.highSoftBed = cstr.highSoftBed + 1
               else System.out.println("[Order Service][Calculate Sold Tickets] Seat class not exists. Order ID:" + order.id)
           }
 
         }
         sender() ! Response(0, "Success: Sold Tickets", cstr)
 
-      case GetAllOrders =>
+      case c:GetAllOrders =>
         sender() ! Response(0, "Success", state.orders.values.toList)
 
       case c: ModifyOrder =>
         state.orders.get(c.orderId) match {
           case Some(order) =>
+
             order.status = c.status
             saveChanges(order)
+            println("Success: order modified")
             sender() ! Response(0, "Success: order modified", None)
           case None =>
             sender() ! Response(1, "Failure: order not found", None)
@@ -189,20 +195,20 @@ object TSOrderOtherService {
       case c: GetOrderById =>
         state.orders.get(c.orderId) match {
           case Some(order) =>
+            println("======== orderOtherService: GetOrderByIdSuccess " )
             sender() ! Response(0, "Success", order)
           case None =>
+            println("======== orderOtherService: GetOrderByIdFailure " )
             sender() ! Response(1, "No order with that id", None)
         }
       case c:CheckSecurityAboutOrder =>
         val orders = state.orders.values.filter(order => order.accountId == c.accountId)
         var countOrderInOneHour = 0
         var countTotalValidOrder = 0
-        import java.util.Calendar
         val ca: Calendar = Calendar.getInstance
         ca.setTime(c.dateFrom)
         ca.add(Calendar.HOUR_OF_DAY, -1)
         val dateFrom = ca.getTime
-        import TSCommon.Commons.OrderStatus
         for (order <- orders) {
           if ((order.status == OrderStatus().NOTPAID._1) || (order.status == OrderStatus().PAID._1) ||
             (order.status == OrderStatus().COLLECTED._1)) countTotalValidOrder += 1
@@ -231,15 +237,20 @@ object TSOrderOtherService {
           case None =>
             sender() ! Response(1, "No order with that id", None)
         }
+      case c:UpdateOrder =>
+        state.orders.get(c.order.id) match {
+          case Some(order) =>
+            saveChanges(c.order)
+            sender() ! Response(0, "Success: Delete", order)
+          case None =>
+            sender() ! Response(1, "No order with that id", None)
+        }
     }
 
     def saveChanges(order: Order): Unit = {
       persist(Create(order))(updateState)
 
     }
-
-
-
     def queryOrders(qi:OrderInfo, accountId: Int):List[Order] = { //1.Get all orders of the user
       val list = state.orders.values.filter(order =>order.accountId ==accountId)
       var finalList: List[Order] = List()
@@ -272,23 +283,13 @@ object TSOrderOtherService {
       }
       finalList
     }
-
-
     def queryForStationId(queryIds: List[Int]):List[String]  = {
       var names: Option[List[String]] = None
-      val response: Future[Any] = stationService ? QueryByIdBatchStation(queryIds)
-      response onComplete {
-        case Success(res) =>
-          if (res.asInstanceOf[Response].status == 0) names = Some(res.asInstanceOf[Response].data.asInstanceOf[List[String]])
-          else names = None
-        case Failure(_) =>
-          names = None
-      }
+      val responseFuture: Future[Any] = stationService ? QueryByIdBatchStation(queryIds)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if (response.status == 0) names = Some(response.data.asInstanceOf[List[String]])
       names.get
     }
-
-
-
   }
 
 }

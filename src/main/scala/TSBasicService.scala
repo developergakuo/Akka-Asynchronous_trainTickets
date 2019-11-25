@@ -1,24 +1,14 @@
-import TSAuthService.UsersServiceSate
 import TSCommon.Commons._
 import akka.actor.ActorRef
 import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotOffer}
 import akka.util.Timeout
-
-import scala.concurrent.duration._
 import scala.concurrent.Future
-import scala.concurrent._
-import ExecutionContext.Implicits.global
+import scala.concurrent.Await
 import akka.pattern.ask
-implicit val timeout: Timeout = 2.seconds
-import scala.util.{Success, Failure}
 object TSBasicService {
   case class UserRepository(users: Map[Int,User])
-  class BasicService extends PersistentActor {
+  class BasicService (stationService: ActorRef , trainService: ActorRef , routeService: ActorRef , priceService: ActorRef) extends PersistentActor {
     var state = UserRepository(users = Map())
-    var stationService: ActorRef = null
-    var trainService: ActorRef = null
-    var routeService: ActorRef = null
-    var priceService: ActorRef = null
 
     override def preStart(): Unit = {
       println("Client prestart")
@@ -79,10 +69,11 @@ object TSBasicService {
                 prices = prices + ("economyClass" -> priceForEconomyClass)
                 prices = prices + ("confortClass" ->  priceForConfortClass)
               } catch {
-                case  Exception =>
+                case  _:Exception =>
                   prices = prices + ("economyClass"-> 95.0)
                   prices = prices + ("confortClass"-> 120.0)
               }
+              println("========== BasicService:QueryForTravel: Success ")
               sender()! Response(0, "Success", TravelResult(status=true,0,trntype,prices,""))
             case None =>
               sender() ! Response(1, "Train type doesn't exist",None)
@@ -91,8 +82,11 @@ object TSBasicService {
 
 
       case c: QueryForStationId =>
+        println("========== BasicService:QueryForStationId ")
         queryForStationId(c.stationName) match {
-          case Some(id)=> sender() ! Response(0, "Success", id)
+          case Some(id)=>
+            println("========== BasicService:QueryForStationId: Success ")
+            sender() ! Response(0, "Success", id)
           case None => sender() ! Response(1, "No Station Found", None)
 
         }
@@ -102,61 +96,48 @@ object TSBasicService {
 
     def queryForStationId(stationName: String): Option[Int] = {
       var staionId:Option[Int] = None
-      val response: Future[Any] = stationService ? QueryForStationId(stationName)
-      response onComplete {
-        case Success(resp)=> if(resp.asInstanceOf[Response].status == 0)
-          staionId = Some(resp.asInstanceOf[Response].data.asInstanceOf[Int])
-        case Failure(_) => staionId = None
-      }
+      val responseFuture: Future[Any] = stationService ? QueryForIdStation(stationName)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if(response.status == 0) staionId = Some(response.data.asInstanceOf[Int])
       staionId
     }
 
     def checkStationExists(stationName: String): Boolean = {
       var exists = false
-      val response: Future[Any] = stationService ? QueryForStationId(stationName)
-      response onComplete {
-        case Success(resp)=> if(resp.asInstanceOf[Response].status == 0) exists = true
-        case Failure(_) => exists = false
-      }
+      val responseFuture: Future[Any] = stationService ? QueryForIdStation(stationName)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if(response.status == 0) exists = true
       exists
       }
 
     def queryTrainType(trainTypeId: Int): Option[TrainType] = {
+      println("========== BasicService:queryTrainType ")
       var trainType: Option[TrainType] = None
-      val response: Future[Any] = trainService ? GetTrainType(trainTypeId)
-      response onComplete {
-        case Success(resp)=>
-          if(resp.asInstanceOf[Response].status == 0)
-            trainType = Some(resp.asInstanceOf[Response].data.asInstanceOf[TrainType])
-          else trainType = None
-        case Failure(_) => trainType = None
+      val responseFuture: Future[Any] = trainService ? RetrieveTrain(trainTypeId)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if(response.status == 0){
+        println("========== BasicService:queryTrainType: success")
+        trainType = Some(response.data.asInstanceOf[TrainType])
       }
       trainType
     }
 
     private def getRouteByRouteId(routeId: Int):Option[Route] = {
       var route: Option[Route] = None
-      val response: Future[Any] = routeService ? GetRouteById(routeId)
-      response onComplete {
-        case Success(resp)=>
-          if(resp.asInstanceOf[Response].status == 0)
-            route = Some(resp.asInstanceOf[Response].data.asInstanceOf[Route])
-          else route = None
-        case Failure(_) => route = None
+      val responseFuture: Future[Any] = routeService ? GetRouteById(routeId)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if(response.status == 0) {
+        println("========== BasicService:getRouteByRouteId: success ")
+        route = Some(response.data.asInstanceOf[Route])
       }
       route
     }
 
     private def queryPriceConfigByRouteIdAndTrainType(routeId: Int, trainType: Int):Option[PriceConfig] = {
       var priceConfig: Option[PriceConfig] = None
-      val response: Future[Any] = priceService ? QueryPriceConfigByRouteIdAndTrainType(routeId,trainType)
-      response onComplete {
-        case Success(resp)=>
-          if(resp.asInstanceOf[Response].status == 0)
-            priceConfig = Some(resp.asInstanceOf[Response].data.asInstanceOf[PriceConfig])
-          else priceConfig = None
-        case Failure(_) => priceConfig = None
-      }
+      val responseFuture: Future[Any] = priceService ? FindByRouteIdAndTrainType(routeId,trainType)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if(response.status == 0) priceConfig = Some(response.data.asInstanceOf[PriceConfig])
       priceConfig
     }
 

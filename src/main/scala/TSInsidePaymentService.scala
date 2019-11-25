@@ -4,24 +4,16 @@ import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotO
 import scala.concurrent.duration._
 import akka.util.Timeout
 import akka.pattern.ask
-import scala.concurrent.{ExecutionContext, Future}
-import scala.util.{Failure, Success}
-import ExecutionContext.Implicits.global
+import scala.concurrent.{Await, Future}
+import InputData.moneys
 
-
-implicit val timeout: Timeout = 2.seconds
 object TSInsidePaymentService {
+
   case class Repository(payments: Map[Int, Payment2], moneys: Map[Int,Money2])
 
-  class InsidePaymentService extends PersistentActor {
-    var state: Repository = Repository(Map(), Map())
-    var paymentService: ActorRef = null
-    var travelService: ActorRef = null
-    var stationService: ActorRef = null
-    var orderService: ActorRef =null
-    var orderOtherService: ActorRef =null
-
-
+  class InsidePaymentService(paymentService: ActorRef,
+                             orderService: ActorRef, orderOtherService: ActorRef,notificationService: ActorRef) extends PersistentActor {
+    var state: Repository = Repository(Map(), moneys.zipWithIndex.map(a=>a._2+1 -> a._1).toMap)
 
 
     override def preStart(): Unit = {
@@ -65,42 +57,33 @@ object TSInsidePaymentService {
         if (c.info.tripId == 1 || c.info.tripId == 2) service = orderService
         else service = orderOtherService
         var order: Option[Order] = None
-        val response: Future[Any] = service ? GetOrderById(c.info.orderId)
-        response onComplete {
-          case Success(res) =>
-            if (res.asInstanceOf[Response].status == 0) order = Some(res.asInstanceOf[Response].data.asInstanceOf[Order])
-          case Failure(_) =>
-            order = None
-        }
+        val responseFuture: Future[Any] = service ? GetOrderById(c.info.orderId)
+        val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+        if (response.status == 0) order = Some(response.data.asInstanceOf[Order])
+
         order match{
           case Some(o) =>
             val payment = Payment2(orderId =c.info.orderId,userId = c.info.userId, price = c.info.price)
             val totalExpand = state.payments.values.filter(payment=> payment.userId == c.info.userId)
               .map(payment => payment.price).sum + o.price
             val money = state.moneys.values.filter(money=>money.userId == c.info.userId).map(money=>money.money).sum
-
-            if (totalExpand > money) {
+            if (totalExpand < money) {
               val outsidePaymentInfo =  PaymentInfo(c.info.userId,c.info.orderId,c.info.tripId,o.price)
-
-              val response: Future[Any] = paymentService ? Pay(outsidePaymentInfo)
-              response onComplete {
-                case Success(res) =>
-                  if (res.asInstanceOf[Response].status == 0){
-                    payment.paymentType = PaymentType().O
-                    persist(SavePayment(payment))(updateState)
-                    sender() ! Response(0, "Payment Success", None)
+              val responseFuture: Future[Any] = paymentService ? Pay(outsidePaymentInfo)
+              val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+                  if (response.status == 0){
+                    if(setOrderStatus(c.info.tripId, c.info.orderId)){
+                      payment.paymentType = PaymentType().O
+                      persist(SavePayment(payment))(updateState)
+                      notificationService ! Order_Paid_success(NotifyInfo("",o.id,o.contactsName,o.to,o.from,o.travelTime,o.travelDate,o.seatClass,o.seatNumber,o.price), sender())
+                    }
+                    else sender() ! Response(1, "Order Change Failure", None)
                   }
-                  else sender() ! Response(1, "Payment Failure", None)
-                case Failure(f) =>
-                  sender() ! Response(1, "Payment error", f)
-              }
+                  else sender() ! Response(1, "Order Change Failure", None)
             }
-            else {
-              setOrderStatus(c.info.tripId, c.info.orderId)
-              payment.paymentType = PaymentType().P
-              persist(SavePayment(payment))(updateState)
-            }
-            sender() !  Response(0, "Payment Success", None)
+            else sender() ! Response(1, "Insufficient Money Failure", None)
+
+
           case None =>
          sender() ! Response(1, "Payment Failed, Order Not Exists", null);
         }
@@ -132,8 +115,10 @@ object TSInsidePaymentService {
         state.moneys.get(c.userId) match {
           case Some(_) =>
             persist(DrawBack(c.userId, c.money))(updateState)
+            println(" =========Inside Service: DrawBackSuccess")
             sender() ! Response(0,"Success: Money drawback", None)
           case None =>
+            println(" =========Inside Service: DrawBackFailure")
             sender() ! Response(1,"Error: acc does not exist", None)
         }
 
@@ -146,18 +131,14 @@ object TSInsidePaymentService {
             if (totalExpand > money) {
               val outsidePaymentInfo =  PaymentInfo(c.info.userId,c.info.orderId,c.info.tripId,c.info.price)
 
-              val response: Future[Any] = paymentService ? Pay(outsidePaymentInfo)
-              response onComplete {
-                case Success(res) =>
-                  if (res.asInstanceOf[Response].status == 0){
+              val responseFuture: Future[Any] = paymentService ? Pay(outsidePaymentInfo)
+                    val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+                  if (response.status == 0){
                     payment.paymentType = PaymentType().E
                     persist(SavePayment(payment))(updateState)
                     sender() ! Response(0, "Payment Success", None)
                   }
                   else sender() ! Response(1, "Payment Failure", None)
-                case Failure(f) =>
-                  sender() ! Response(1, "Payment error", f)
-              }
             }
             else {
               setOrderStatus(c.info.tripId, c.info.orderId)
@@ -171,28 +152,18 @@ object TSInsidePaymentService {
 
       case  QueryAddMoney( ) =>
         sender() ! Response(0, "Success", state.moneys.values.toList)
-      
     }
 
-     def setOrderStatus(tripId: Int, orderId: Int): Int = {
+     def setOrderStatus(tripId: Int, orderId: Int): Boolean = {
        var service: ActorRef = null
       val orderStatus = 1
       //order paid and not collected
-      var result = -1
-      if (tripId == 1 || tripId == 2){
-        service = orderService
-      }
-      else {
-        service = orderOtherService
-      }
-       val response: Future[Any] = service ? ModifyOrder(orderId,orderStatus)
-       response onComplete {
-         case Success(res) =>
-           if (res.asInstanceOf[Response].status == 0) result = 0
-           else result = 1
-         case Failure(_) =>
-           result = 1
-       }
+      var result = false
+      if (tripId == 1 || tripId == 2) service = orderService
+      else service = orderOtherService
+       val responseFuture: Future[Any] = service ? ModifyOrder(orderId,orderStatus)
+       val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+       if (response.status == 0) result = true
       result
     }
 

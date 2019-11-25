@@ -1,87 +1,89 @@
-
 import TSCommon.Commons._
 import akka.actor.{Actor, ActorRef}
 import akka.pattern.ask
 import akka.util.Timeout
-
 import scala.concurrent.duration._
 import scala.concurrent.Future
-import scala.concurrent._
-import ExecutionContext.Implicits.global
-import scala.util.{Failure, Success}
+import scala.concurrent.Await
 import java.util.{Calendar, Date}
 
-implicit val timeout: Timeout = 2.seconds
 
 object TSRebookService {
-  class TSRebookService extends Actor {
-    var orderService: ActorRef = null
-    var orderOtherService: ActorRef = null
-    var travelService: ActorRef = null
-    var travel2service: ActorRef = null
-    var stationService: ActorRef = null
-    var insidePayService: ActorRef = null
-    var seatservice: ActorRef = null
-
+  class RebookService (orderService: ActorRef, orderOtherService: ActorRef, travelService: ActorRef,
+                       travel2service: ActorRef, stationService: ActorRef, insidePayService: ActorRef, seatService: ActorRef, notificationService: ActorRef) extends Actor {
     override def receive: Receive = {
       case c:Rebook =>
+        println("======== rebookService: Rebook ")
          getOrderByRebookInfo(c.info) match {
           case Some(order) =>
             val status = order.status
             if (status == OrderStatus().NOTPAID._1) {
               sender() ! Response  (1, "You haven't paid the original ticket!", null)
             } else if (status == OrderStatus().PAID._1) {
-              // do nothing
-            } else if (status == OrderStatus().CHANGE._1) {
-              sender() ! Response  (1, "You have already changed your ticket and you can only change one time.", null)
-            } else if (status == OrderStatus().COLLECTED._1) {
-              sender() ! Response(1, "You have already collected your ticket and you can change it now.", null)
-            } else {
-               sender() ! Response (1, "You can't change your ticket.", null)
-            }
-            if (!checkTime(order.travelDate, order.travelTime)) {
-              sender() ! (1, "You can only change the ticket before the train start or within 2 hours after the train start.", null)
-            }
-            val gtdi =  TripAllDetailInfo(c.info.tripId,c.info.date,queryForStationName(order.from),queryForStationName(order.to))
-              getTripAllDetailInformation(gtdi, c.info.tripId) match {
-                case None => sender() ! Response  (1, "Error", null)
-                case Some(tripAllDetail)=>
-                  val tripResponse = tripAllDetail.tripResponse
-                  if (c.info.seatType == SeatClass().firstClass._1) {
-                    if (tripResponse.confortClass <= 0) {
-                      sender()! Response  (1, "Seat Not Enough", null)
-                    }
-                  } else {
-                    if (tripResponse.economyClass == SeatClass().secondClass._1) {
-                      if (tripResponse.economyClass <= 0) {
+              if (!checkTime(order.travelDate, order.travelTime)) {
+                sender() ! (1, "You can only change the ticket before the train start or within 2 hours after the train start.", null)
+              } else{
+                val gtdi =  TripAllDetailInfo(c.info.tripId,c.info.date,queryForStationName(order.from),queryForStationName(order.to))
+                getTripAllDetailInformation(gtdi, c.info.tripId) match {
+                  case None => sender() ! Response  (1, "Error", null)
+                  case Some(tripAllDetail)=>
+                    val tripResponse = tripAllDetail.tripResponse
+                    if (c.info.seatType == SeatClass().firstClass._1) {
+                      if (tripResponse.confortClass <= 0) {
                         sender()! Response  (1, "Seat Not Enough", null)
                       }
+                    } else {
+                      if (tripResponse.economyClass == SeatClass().secondClass._1) {
+                        if (tripResponse.economyClass <= 0) {
+                          sender()! Response  (1, "Seat Not Enough", null)
+                        }
+                      }
                     }
-                  }
-                  var ticketPrice = 0.0
-                  if (c.info.seatType == SeatClass().firstClass._1) {
-                    ticketPrice = tripResponse.priceForConfortClass
-                  } else if (c.info.seatType == SeatClass().secondClass._1) {
-                    ticketPrice = tripResponse.priceForEconomyClass
-                  }
-                  val oldPrice: Double = order.price()
-                  if (oldPrice > ticketPrice  ) {
-                    val difference = oldPrice - ticketPrice
-                    if (!drawBackMoney(c.info.loginId, difference)) {
-                      sender() ! Response (1, "Can't draw back the difference money, please try again!", null)
+                    var ticketPrice = 0.0
+                    if (c.info.seatType == SeatClass().firstClass._1) {
+                      ticketPrice = tripResponse.priceForConfortClass
+                    } else if (c.info.seatType == SeatClass().secondClass._1) {
+                      ticketPrice = tripResponse.priceForEconomyClass
                     }
-                     if(updateOrder(order, c.info, tripAllDetail,ticketPrice)) sender() ! (0,"Success", None)
-                     else  sender() ! (1,"error in order update", None)
-                  } else if (oldPrice == ticketPrice) {
-                    //do nothing
-                    if( updateOrder(order, c.info, tripAllDetail, ticketPrice)) sender() ! (0,"Success", None)
-                    else sender() ! (1,"error in order update", None)
-                  } else {
-                    //补差价
-                    val difference = ticketPrice - oldPrice
-                    sender() ! Response (2, "Please pay the different money!", difference)
-                  }
+                    val oldPrice: Double = order.price
+                    if (oldPrice > ticketPrice  ) {
+                      val difference = oldPrice - ticketPrice
+                      if (!drawBackMoney(c.info.loginId, difference)) {
+                        sender() ! Response (1, "Can't draw back the difference money, please try again!", null)
+                      }
+                      if(updateOrder(order, c.info, tripAllDetail,ticketPrice)){
+                        println("We are here")
+                        notificationService ! Order_Rebook_success(NotifyInfo(email ="",order.id,order.contactsName,
+                          order.from,order.to,order.travelTime,order.travelDate,order.seatClass,order.seatNumber,order.price),sender())
+                      }
+                      else  sender() ! (1,"error in order update", None)
+                    } else if (oldPrice == ticketPrice) {
+                      //do nothing
+                      if( updateOrder(order, c.info, tripAllDetail, ticketPrice))
+                        notificationService ! Order_Rebook_success(NotifyInfo(email ="",order.id,order.contactsName,
+                          order.from,order.to,order.travelTime,order.travelDate,order.seatClass,order.seatNumber,order.price),sender())
+                      else sender() ! (1,"error in order update", None)
+                    } else {
+                      //补差价
+                      val difference = ticketPrice - oldPrice
+                      sender() ! Response (2, "Please pay the different money!", difference)
+                    }
+                }
+                // do nothing
               }
+            }
+            else if (status == OrderStatus().CHANGE._1) {
+              sender() ! Response  (1, "You have already changed your ticket and you can only change one time.", null)
+            }
+            else if (status == OrderStatus().COLLECTED._1) {
+              sender() ! Response(1, "You have already collected your ticket and you can change it now.", null)
+            }
+            else {
+               sender() ! Response (1, "You can't change your ticket.", null)
+            }
+
+
+
           case None =>
             Response(1, "order not found", null);
 
@@ -127,13 +129,18 @@ object TSRebookService {
         seatClass = SeatClass().secondClass._1
         seatNo = ticket.seatNo
       }
-      if ((tripGD(oldTripId) && tripGD(info.tripId())) || (!tripGD(oldTripId) && !tripGD(info.tripId()))) {
-
+      if ((tripGD(oldTripId) && tripGD(info.tripId)) || (!tripGD(oldTripId) && !tripGD(info.tripId))) {
         val changeOrderResult = updateOrder(order, info.tripId)
-        if (changeOrderResult == 0) true         else false
+        if (changeOrderResult == 0) {
+          println("But we are here")
+          true
+        }
+        else {
+          false
+        }
       }
       else {
-        deleteOrder(order.id(), oldTripId)
+        deleteOrder(order.id, oldTripId)
         createOrder(order, order.trainNumber)
         true
       }
@@ -142,13 +149,9 @@ object TSRebookService {
     def  dispatchSeat( date : Date,  tripId: Int,  startStationId: Int,  endStataionId: Int,  seatType: Int): Ticket = {
       val seatRequest =  Seat(date,tripId,startStationId,endStataionId,seatType)
       var ticket: Option[Ticket]= None
-      val response: Future[Any] = seatservice ? DistributeSeat(seatRequest)
-      response onComplete {
-        case Success(res) =>
-          if (res.asInstanceOf[Response].status == 0) ticket = Some(res.asInstanceOf[Response].data.asInstanceOf[Ticket])
-        case Failure(_) =>
-          ticket = None
-      }
+      val responseFuture: Future[Any] = seatService ? DistributeSeat(seatRequest)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if (response.status == 0) ticket = Some(response.data.asInstanceOf[Ticket])
       ticket.get
     }
 
@@ -191,16 +194,10 @@ object TSRebookService {
       var service: ActorRef = null
       if (tripId ==1  || tripId == 2 ) service = travelService
       else service = travel2service
-
       var tripAllDetail: Option[TripAllDetail] = None
-      val response: Future[Any] = service ? GetTripAllDetailInfo(gtdi)
-      response onComplete {
-        case Success(res) =>
-          if (res.asInstanceOf[Response].status == 0) tripAllDetail = Some(res.asInstanceOf[Response].data.asInstanceOf[TripAllDetail])
-          else tripAllDetail = None
-        case Failure(_) =>
-          tripAllDetail = None
-      }
+      val responseFuture: Future[Any] = service ? GetTripAllDetailInfo(gtdi)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if (response.status == 0) tripAllDetail = Some(response.data.asInstanceOf[TripAllDetail])
       tripAllDetail
     }
 
@@ -208,15 +205,10 @@ object TSRebookService {
       var service: ActorRef = null
       if (tripId ==1  || tripId == 2 ) service = orderService
       else service = orderOtherService
-
       var createOrderResponse: Int = -1
-      val response: Future[Any] = service ? Create(order)
-      response onComplete {
-        case Success(res) =>
-          if (res.asInstanceOf[Response].status == 0) createOrderResponse = 0
-        case Failure(_) =>
-          createOrderResponse = -1
-      }
+      val responseFuture: Future[Any] = service ? Create(order)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if (response.status == 0) createOrderResponse = 0
       createOrderResponse
     }
 
@@ -224,15 +216,10 @@ object TSRebookService {
       var service: ActorRef = null
       if (tripId ==1  || tripId == 2 ) service = orderService
       else service = orderOtherService
-
       var updateOrderResponse: Int = -1
-      val response: Future[Any] = service ? UpdateOrder(order)
-      response onComplete {
-        case Success(res) =>
-          if (res.asInstanceOf[Response].status == 0) updateOrderResponse = 0
-        case Failure(_) =>
-          updateOrderResponse = -1
-      }
+      val responseFuture: Future[Any] = service ? UpdateOrder(order)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if (response.status == 0) updateOrderResponse = 0
       updateOrderResponse
     }
 
@@ -241,71 +228,62 @@ object TSRebookService {
       if (tripId ==1  || tripId == 2 ) service = orderService
       else service = orderOtherService
       var deleteOrderResponse: Int = -1
-      val response: Future[Any] = service ? DeleteOrder(orderId)
-      response onComplete {
-        case Success(res) =>
-          if (res.asInstanceOf[Response].status == 0) deleteOrderResponse = 0
-        case Failure(_) =>
-          deleteOrderResponse = -1
-      }
+      val responseFuture: Future[Any] = service ? DeleteOrder(orderId)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if (response.status == 0) deleteOrderResponse = 0
       deleteOrderResponse
     }
 
     def  getOrderByRebookInfo(info: RebookInfo): Option[Order]= {
+      println("======== getOrderByID: ")
       var service: ActorRef = null
-      if (info.oldTripId == 1 || info.oldTripId == 2) service = orderService
-      else service = orderOtherService
-      var order: Option[Order] = None
-      val response: Future[Any] = service ? GetOrderById(info.orderId)
-      response onComplete {
-        case Success(res) =>
-          if (res.asInstanceOf[Response].status == 0) order = Some(res.asInstanceOf[Response].data.asInstanceOf[Order])
-        case Failure(_) =>
-          order = None
+      if (info.oldTripId == 1 || info.oldTripId == 2){
+        println("======== getOrderByID serice: " )
+      service = orderService
+    }
+      else {
+        println("======== getOrderByID serice: Other " )
+        service = orderOtherService
       }
+
+      var order: Option[Order] = None
+      val responseFuture: Future[Any] = service ? GetOrderById(info.orderId)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if (response.status == 0) {
+        println("======== getOrderByID: success")
+        order = Some(response.data.asInstanceOf[Order])
+      }
+
+
       order
     }
 
     def  queryForStationName( stationId: Int):String = {
       var stationName: Option[String]= None
-      val response: Future[Any] = stationService ? QueryByIdStation(stationId)
-      response onComplete {
-        case Success(res) =>
-          if (res.asInstanceOf[Response].status == 0) stationName =Some(res.asInstanceOf[Response].data.asInstanceOf[String])
-        case Failure(_) =>
-          stationName = None
-    }
+      val responseFuture: Future[Any] = stationService ? QueryByIdStation(stationId)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if (response.status == 0) stationName =Some(response.data.asInstanceOf[String])
       stationName.get
     }
 
     def  payDifferentMoney(orderId: Int,  tripId: Int,  userId: Int, money: Double): Boolean = {
       val info: PaymentInfo = PaymentInfo(orderId, tripId, userId, money)
       var paydifferenceResponse: Int = 1
-      val response: Future[Any] = insidePayService ? PayDifference2(info)
-      response onComplete {
-        case Success(res) =>
-          if (res.asInstanceOf[Response].status == 0) paydifferenceResponse = 0
-        case Failure(_) =>
-          paydifferenceResponse = -1
-
-      }
-
+      val responseFuture: Future[Any] = insidePayService ? PayDifference2(info)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if (response.status == 0) paydifferenceResponse = 0
       if (paydifferenceResponse == 0) true
       else false
     }
 
     def  drawBackMoney( userId: Int,  money: Double): Boolean={
-      var drawbackResponse: Int = 1
-      val response: Future[Any] = insidePayService ? DrawBack(userId,money)
-      response onComplete {
-        case Success(res) =>
-          if (res.asInstanceOf[Response].status == 0) drawbackResponse = 0
-        case Failure(_) =>
-          drawbackResponse = -1
+      val responseFuture: Future[Any] = insidePayService ? DrawBack(userId,money)
+      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
+      if (response.status == 0) {
+        println("DrawBackSuccess:")
+        true
       }
-      if (drawbackResponse == 0) true
-          else false
-
+      else false
     }
 
     }

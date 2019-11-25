@@ -1,23 +1,14 @@
 
 import TSCommon.Commons.{Response, _}
-import akka.actor.ActorRef
 import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotOffer}
-import akka.util.Timeout
 
-import scala.concurrent.duration._
 
-implicit val timeout: Timeout = 2.seconds
 
 object TSPaymentService {
   case class PaymentRepository(moneys: Map[Int, Money], payments: Map[Int,Payment])
 
   class PaymentService extends PersistentActor {
     var state: PaymentRepository = PaymentRepository(Map(),Map())
-    var routeService: ActorRef = null
-    var trainService: ActorRef = null
-    var trainTicketInfoService: ActorRef = null
-    var orderService: ActorRef = null
-    var seatService: ActorRef = null
 
     override def preStart(): Unit = {
       println("TravelService prestart")
@@ -66,14 +57,9 @@ object TSPaymentService {
             persist(c)(updateState)
             sender() ! Response(0, "Success: Payment added",None )
         }
-
-
-
       case c:AddMoney2 =>
         persist(c)(updateState)
         sender() ! Response(0,"Success", None)
-
-
       case Query2 =>
         sender() ! Response(0, "Success",state.payments)
       case c:InitPayment =>

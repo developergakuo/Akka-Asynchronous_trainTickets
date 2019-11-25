@@ -1,15 +1,13 @@
-
-
-
 import TSCommon.Commons.{Response, _}
 import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotOffer}
-
+import InputData._
 object TSFoodMapService {
 
   case class FoodRepository(foodStore: Map[Int, FoodStore], trainFood: Map[Int, TrainFood])
 
   class FoodMapService extends PersistentActor {
-    var state: FoodRepository = FoodRepository(Map(),Map())
+    var state: FoodRepository = FoodRepository(foodStores.zipWithIndex.map(a => a._2+1 -> a._1).toMap,
+                                  trainFoods.zipWithIndex.map(a=>a._2+1 -> a._1).toMap)
 
     override def preStart(): Unit = {
       println("TravelService prestart")

@@ -12,13 +12,13 @@ import scala.concurrent._
 import ExecutionContext.Implicits.global
 import scala.util.{Failure, Success}
 
-implicit val timeout: Timeout = 2.seconds
 
 object TSAdminRouteService {
 
-  class AdminRouteService extends Actor {
 
-    var routeService: ActorRef = null
+  class AdminRouteService(routeService: ActorRef ) extends Actor {
+
+
 
 
     override def receive: Receive = {

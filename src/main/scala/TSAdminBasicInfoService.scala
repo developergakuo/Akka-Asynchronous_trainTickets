@@ -10,28 +10,19 @@ import scala.concurrent._
 import ExecutionContext.Implicits.global
 import scala.util.{Failure, Success}
 
-implicit  val timeout: Timeout = 2.seconds
 
 object TSAdminBasicInfoService {
 
-  class AdminBasicInfoService extends Actor {
-    var routeService: ActorRef = null
-    var trainService: ActorRef = null
-    var trainTicketInfoService: ActorRef = null
-    var orderService: ActorRef = null
-    var seatService: ActorRef = null
-    var conactService: ActorRef = null
-    var stationService: ActorRef = null
-    var configService: ActorRef = null
-    var priceService: ActorRef = null
 
-
+  class AdminBasicInfoService(routeService: ActorRef , trainService: ActorRef , trainTicketInfoService: ActorRef ,
+                              orderService: ActorRef , seatService: ActorRef , contactService: ActorRef ,
+                              stationService: ActorRef , configService: ActorRef , priceService: ActorRef) extends Actor {
     override def receive: Receive = {
 
       ////////////////////////////contactservice///////////////////////////////
       case GetAllContacts =>
         var contacts: Option[List[Contacts]] = None
-        val response: Future[Any] = conactService ? GetAllContacts()
+        val response: Future[Any] = contactService ? GetAllContacts()
         response onComplete {
           case Success(res) =>
             if (res.asInstanceOf[Response].status == 0) contacts = Some(res.asInstanceOf[Response].data.asInstanceOf[List[Contacts]])
@@ -48,7 +39,7 @@ object TSAdminBasicInfoService {
 
 
       case c:AddContact =>
-        val response: Future[Any] = conactService ? c
+        val response: Future[Any] = contactService ? c
         response onComplete {
           case Success(res) =>
             if (res.asInstanceOf[Response].status == 0) sender() ! Response(0,"Success",None)
@@ -59,7 +50,7 @@ object TSAdminBasicInfoService {
 
 
       case c:DeleteContact =>
-        val response: Future[Any] = conactService ? c
+        val response: Future[Any] = contactService ? c
         response onComplete {
           case Success(res) =>
             if (res.asInstanceOf[Response].status == 0) sender() ! Response(0,"Success",None)
@@ -69,7 +60,7 @@ object TSAdminBasicInfoService {
         }
 
       case c:ModifyContact =>
-        val response: Future[Any] = conactService ? c
+        val response: Future[Any] = contactService ? c
         response onComplete {
           case Success(res) =>
             if (res.asInstanceOf[Response].status == 0) sender() ! Response(0,"Success",None)
@@ -98,7 +89,7 @@ object TSAdminBasicInfoService {
         }
 
       case c: AddStation =>
-        val response: Future[Any] = conactService ? CreateStation(c.s)
+        val response: Future[Any] = contactService ? CreateStation(c.s)
         response onComplete {
           case Success(res) =>
             if (res.asInstanceOf[Response].status == 0) sender() ! Response(0,"Success",None)
@@ -108,7 +99,7 @@ object TSAdminBasicInfoService {
         }
 
       case c:DeleteStation =>
-        val response: Future[Any] = conactService ? c
+        val response: Future[Any] = contactService ? c
         response onComplete {
           case Success(res) =>
             if (res.asInstanceOf[Response].status == 0) sender() ! Response(0,"Success",None)
@@ -118,7 +109,7 @@ object TSAdminBasicInfoService {
         }
 
       case c:ModifyStation =>
-        val response: Future[Any] = conactService ? UpdateStation(c.s)
+        val response: Future[Any] = contactService ? UpdateStation(c.s)
         response onComplete {
           case Success(res) =>
             if (res.asInstanceOf[Response].status == 0) sender() ! Response(0,"Success",None)
