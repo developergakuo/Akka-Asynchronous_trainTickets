@@ -2,21 +2,50 @@
 import TSCommon.Commons.{Response, _}
 import akka.actor.{Actor, ActorRef}
 import akka.pattern.ask
+import akka.persistence._
 import akka.util.Timeout
 
 import scala.concurrent.duration._
 import scala.concurrent.Future
 import scala.concurrent._
 import ExecutionContext.Implicits.global
+import scala.collection.mutable.ListBuffer
 import scala.util.{Failure, Success}
 
 
 object TSNotificationService {
+case class EmailRepository(outbox: Map[ActorRef,ListBuffer[Mail]])
+class NotificationService extends PersistentActor with AtLeastOnceDelivery {
+  var state = EmailRepository(Map())
+  override def preStart(): Unit = {
+    println("UserService prestart")
+    super.preStart()
+  }
 
-class NotificationService extends Actor {
+  override def postRestart(reason: Throwable): Unit = {
+    println("UserService post restart")
+    println(reason)
+    super.postRestart(reason)
+  }
 
-  override def receive: Receive ={
-    case Preserve_success(info: NotifyInfo,receiver: ActorRef  ) =>
+  override def persistenceId = "UserService-id"
+
+  override def recovery: Recovery = super.recovery
+
+  override def receiveRecover: Receive = {
+    case e:SaveMail  ⇒
+
+
+  }
+
+  def updateState(evt: Evt): Unit = evt match {
+    case c: SaveMail ⇒
+      val userOutBox = state.outbox.getOrElse(c.user,ListBuffer())
+      state = EmailRepository( state.outbox + (c.user -> userOutBox.+=(c.email)))
+  }
+
+  override def receiveCommand: Receive ={
+    case Preserve_success(info: NotifyInfo,receiver: ActorRef  )  =>
       val email = Mail(mailFrom="rainservice.com",
         mailto = info.email,mailSubject = "Preserve_success",
         model =Map("username"-> info.username,
@@ -27,7 +56,8 @@ class NotificationService extends Actor {
                     "seatClass"->info.seatClass,
                      "seatNumber"->info.seatNumber,
                      "price"->info.price))
-      receiver ! Response(0, "Success", PreservationSuccess(email))
+      persist(SaveMail(receiver,email))(updateState)
+      deliver(receiver.path)(deliveryId=> Response(0, "Success", PreservationSuccess(deliveryId,email)))
 
     case Order_create_success(info: NotifyInfo,receiver: ActorRef) =>
       val email = Mail(mailFrom="rainservice.com",
@@ -40,7 +70,8 @@ class NotificationService extends Actor {
           "seatClass"->info.seatClass,
           "seatNumber"->info.seatNumber,
           "price"->info.price))
-      receiver ! Response(0, "Success", OrderCreated(email))
+      persist(SaveMail(receiver,email))(updateState)
+      deliver(receiver.path)(deliveryId=> Response(0, "Success", OrderCreated(deliveryId,email)))
 
     case Order_changed_success(info: NotifyInfo,receiver: ActorRef ) =>
       val email = Mail(mailFrom="rainservice.com",
@@ -53,7 +84,9 @@ class NotificationService extends Actor {
           "seatClass"->info.seatClass,
           "seatNumber"->info.seatNumber,
           "price"->info.price))
-      receiver ! Response(0, "Success", OrderChanged(email))
+      persist(SaveMail(receiver,email))(updateState)
+      deliver(receiver.path)(deliveryId=> Response(0, "Success", OrderChanged(deliveryId,email)))
+
 
     case Order_cancel_success(info: NotifyInfo,receiver: ActorRef) =>
       val email = Mail(mailFrom="rainservice.com",
@@ -66,7 +99,10 @@ class NotificationService extends Actor {
           "seatClass"->info.seatClass,
           "seatNumber"->info.seatNumber,
           "price"->info.price))
-      receiver ! Response(0, "Success", OrderCanceled(email))
+      persist(SaveMail(receiver,email))(updateState)
+      deliver(receiver.path)(deliveryId=> Response(0, "Success", OrderCanceled(deliveryId,email)))
+
+
     case Order_Rebook_success(info: NotifyInfo,receiver: ActorRef) =>
       val email = Mail(mailFrom="rainservice.com",
         mailto = info.email,mailSubject = "Order_cancel_success",
@@ -78,7 +114,9 @@ class NotificationService extends Actor {
           "seatClass"->info.seatClass,
           "seatNumber"->info.seatNumber,
           "price"->info.price))
-      receiver ! Response(0, "Success", OrderRebooked(email))
+      persist(SaveMail(receiver,email))(updateState)
+      deliver(receiver.path)(deliveryId=> Response(0, "Success", OrderRebooked(deliveryId,email)))
+
     case Order_Paid_success(info: NotifyInfo,receiver: ActorRef) =>
       val email = Mail(mailFrom="rainservice.com",
         mailto = info.email,mailSubject = "Order_cancel_success",
@@ -90,7 +128,11 @@ class NotificationService extends Actor {
           "seatClass"->info.seatClass,
           "seatNumber"->info.seatNumber,
           "price"->info.price))
-      receiver ! Response(0, "Success", OrderPaid(email))
+      persist(SaveMail(receiver,email))(updateState)
+      deliver(receiver.path)(deliveryId=> Response(0, "Success", OrderPaid(deliveryId,email)))
+
+    case ConfirmMailDelivery(deliverId: Long)=>
+      confirmDelivery(deliverId)
   }
 
 }

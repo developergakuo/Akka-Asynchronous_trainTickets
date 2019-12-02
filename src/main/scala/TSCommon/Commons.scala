@@ -13,7 +13,7 @@ object Commons {
   val duration: Duration = 20.seconds
  implicit val timeout: Timeout = 20.seconds
 
- trait command
+  trait Cmd
   trait Evt
   case class Response (status: Int, msg: String, data: Any)
   case class User(userId: Int, username: String, password: String)
@@ -524,7 +524,10 @@ case class CreateAssurance(typeIndex: Int, orderId: Int) extends Evt
  case class Order_changed_success(info: NotifyInfo,receiver: ActorRef ) extends Evt
  case class Order_cancel_success(info: NotifyInfo,receiver: ActorRef ) extends Evt
  case class  Order_Rebook_success(info: NotifyInfo,receiver: ActorRef) extends Evt
-  case class Order_Paid_success(info: NotifyInfo,receiver: ActorRef) extends Evt
+ case class Order_Paid_success(info: NotifyInfo,receiver: ActorRef) extends Evt
+ case class SaveMail(user: ActorRef,email: Mail) extends Evt
+ case class ConfirmMailDelivery(deliverId: Long) extends Cmd
+
  // preserve service
  case class Preserve(oti: OrderTicketsInfo2) extends Evt
 
@@ -541,11 +544,11 @@ case class CreateAssurance(typeIndex: Int, orderId: Int) extends Evt
   case class ClientRebook(oldOrder: Order, newTrip: Trip) extends Evt
   case class ClientPay(order: Order) extends Evt
   case class ClientPreserve(startingStaion: String, endSation: String, travelDate: Date, seatsCount: Int, seatType: Int, assuranceType: Int =1, foodType: Int = 1) extends Evt
-  case class PreservationSuccess(mail: Mail) extends Evt
-  case class OrderCreated(mail: Mail) extends Evt
-  case class OrderChanged(mail: Mail) extends Evt
-  case class OrderCanceled(mail: Mail) extends Evt
-  case class OrderRebooked(mail: Mail) extends Evt
-  case class OrderPaid(mail: Mail) extends Evt
+  case class PreservationSuccess(deliveryId: Long, mail: Mail) extends Evt
+  case class OrderCreated(deliveryId: Long, mail: Mail) extends Evt
+  case class OrderChanged(deliveryId: Long, mail: Mail) extends Evt
+  case class OrderCanceled(deliveryId: Long, mail: Mail) extends Evt
+  case class OrderRebooked(deliveryId: Long, mail: Mail) extends Evt
+  case class OrderPaid(deliveryId: Long, mail: Mail) extends Evt
 
 }

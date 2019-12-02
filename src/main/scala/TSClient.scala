@@ -121,24 +121,30 @@ object TSClient {
                 sender() ! Response(1,"Error: No routes found",None)
             }
           }
-        case Response(0, "Success", PreservationSuccess(email)) =>
+        case Response(0, "Success", PreservationSuccess(deliveryId,email)) =>
+          sender() ! ConfirmMailDelivery(deliveryId)
           println("======== PreservationSuccess ")
-          receiver ! PreservationSuccess(email)
-        case Response(0, "Success", OrderCanceled(email)) =>
+          receiver ! PreservationSuccess(deliveryId,email)
+        case Response(0, "Success", OrderCanceled(deliveryId,email)) =>
+          sender() ! ConfirmMailDelivery(deliveryId)
           println("======== OrderCanceled ")
-          receiver ! OrderCanceled(email)
-        case Response(0, "Success", OrderCreated(email)) =>
+          receiver ! OrderCanceled(deliveryId,email)
+        case Response(0, "Success", OrderCreated(deliveryId,email)) =>
+          sender() ! ConfirmMailDelivery(deliveryId)
           println("======== OrderCreated ")
-          receiver ! OrderCreated(email)
-        case Response(0, "Success", OrderChanged(email))=>
+          receiver ! OrderCreated(deliveryId,email)
+        case Response(0, "Success", OrderChanged(deliveryId,email))=>
+          sender() ! ConfirmMailDelivery(deliveryId)
           println("======== OrderChanged ")
-          receiver ! OrderChanged(email)
-        case Response(0, "Success", OrderPaid(email)) =>
+          receiver ! OrderChanged(deliveryId, email)
+        case Response(0, "Success", OrderPaid(deliveryId,email)) =>
+          sender() ! ConfirmMailDelivery(deliveryId)
           println("======== OrderPaid ")
-          receiver ! OrderPaid(email)
-        case Response(0, "Success", OrderRebooked(email))=>
+          receiver ! OrderPaid(deliveryId,email)
+        case Response(0, "Success", OrderRebooked(deliveryId,email))=>
+          sender() ! ConfirmMailDelivery(deliveryId)
           println("======== OrderRebooked ")
-          receiver ! OrderRebooked(email)
+          receiver ! OrderRebooked(deliveryId,email)
         case Response(1, message, _) =>
           println("======== Client General Error: "+ message)
           receiver ! Response(1, message, None)
