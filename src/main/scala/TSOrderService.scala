@@ -1,20 +1,23 @@
-
 import TSCommon.Commons.{Response, _}
 import akka.actor.ActorRef
 import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotOffer}
 import akka.pattern.ask
+
 import scala.concurrent.Future
 import scala.concurrent.Await
 import java.util.Calendar
-import InputData.{exampleOrder,exampleOrderUnpaid}
+
+import InputData.{exampleOtherOrder, exampleOtherOrderUnpaid}
+
 import scala.collection.mutable.ListBuffer
+import scala.util.Random
 
 
 
 object TSOrderService {
   case class orderRepository(orders: Map[Int, Order])
   class OrderService( stationService: ActorRef) extends PersistentActor {
-    var state: orderRepository = orderRepository(Map(1->exampleOrder,2->exampleOrderUnpaid))
+    var state: orderRepository = orderRepository(Map(1->exampleOtherOrder,2->exampleOtherOrderUnpaid))
     override def preStart(): Unit = {
       println("TravelService prestart")
       super.preStart()
@@ -26,7 +29,7 @@ object TSOrderService {
       super.postRestart(reason)
     }
 
-    override def persistenceId = "TravelService-id"
+    override def persistenceId = "OrderService-id"
 
     override def recovery: Recovery = super.recovery
 
@@ -44,6 +47,7 @@ object TSOrderService {
     def updateState(evt: Evt): Unit = evt match {
       case c: Create ⇒
         state = orderRepository(state.orders + (c.newOrder.id -> c.newOrder))
+        sender() ! ResponseCreate(c.deliveryId,c.requester,c.requestId,c.newOrder,created = true)
       case c: DeleteOrder =>
         state = orderRepository(state.orders - c.orderId)
 
@@ -53,25 +57,26 @@ object TSOrderService {
       case c: FindOrderById =>
         state.orders.get(c.id) match {
           case Some(order) =>
-            sender() ! Response(0, "Success", order)
+            sender() ! ResponseFindOrderById(order, c.deliveryId,c.requester,c.requestId,c.requestLabel,"OtherOrder", found = true)
           case None =>
-            sender() ! Response(1, "No order with that id", None)
+            sender() ! ResponseFindOrderById(null, c.deliveryId,c.requester,c.requestId,c.requestLabel,"OtherOrder")
         }
 
       case c: Create =>
         state.orders.get(c.newOrder.id) match {
           case Some(_) =>
-            sender() ! Response(1, "Order with that id exists", None)
+            sender() ! ResponseCreate(c.deliveryId,c.requester,c.requestId,c.newOrder,created = false,c.requestLabel)
           case None =>
             persist(c)(updateState)
-            Response(0, "Success", None)
+            sender() ! ResponseCreate(c.deliveryId,c.requester,c.requestId,c.newOrder,created = true,c.requestLabel)
+
         }
       case c:SaveChanges =>
         state.orders.get(c.order.id) match {
           case Some(order) =>
             sender() ! Response(1, "Order with similar id does not exist", order)
           case None =>
-            persist(Create(c.order))(updateState)
+            persist(Create(0,self,Random.nextInt(1000),c.order))(updateState)
 
             sender() ! Response(0, "Success: Order Changed", None)
         }
@@ -79,10 +84,10 @@ object TSOrderService {
         state.orders.get(c.orderId) match {
           case Some(order) =>
             order.status = OrderStatus().CANCEL._1
-            persist(Create(order))(updateState)
-            sender() ! Response(0, "Success: order canceled", None)
+            persist(Create(0,self,Random.nextInt(1000),order))(updateState)
+            sender() ! ResponseCancelOrder(canceled = true,c.deliveryId,c.requester,c.requestId,c.requestLabel)
           case None =>
-            sender() ! Response(1, "order not found", None)
+            sender() ! ResponseCancelOrder(canceled = false,c.deliveryId,c.requester,c.requestId,c.requestLabel)
         }
 
       case c:QueryOrders =>
@@ -106,9 +111,6 @@ object TSOrderService {
           i = 1+1
         }
         sender() !  Response(1, "Query Orders For Refresh Success", orders)
-
-
-
       case c: AlterOrder =>
         state.orders.get(c.oai.previousOrderId) match {
           case Some(order) =>
@@ -143,6 +145,7 @@ object TSOrderService {
         }
 
       case c: QueryAlreadySoldOrders =>
+        println("********** QueryAlreadySoldOrders")
         val cstr = SoldTicket(travelDate = c.travelDate,trainNumber = c.trainNumber)
         for (order <- state.orders.values) {
           if ((order.trainNumber == c.trainNumber) && (order.travelDate == c.travelDate)) {
@@ -160,7 +163,9 @@ object TSOrderService {
           }
 
         }
-        sender() ! Response(0, "Success: Sold Tickets", cstr)
+        println("********** QueryAlreadySoldOrders: Success "+ c.trainNumber)
+        sender() ! ResponseQueryAlreadySoldOrders(cstr,c.deliveryId,c.requester,c.requestId,c.requestLabel,found = true, label = c.label, c.sender, tripId = c.trainNumber)
+
 
       case c:GetAllOrders =>
         sender() ! Response(0, "Success", state.orders.values.toList)
@@ -168,8 +173,10 @@ object TSOrderService {
       case c: ModifyOrder =>
         state.orders.get(c.orderId) match {
           case Some(order) =>
+
             order.status = c.status
             saveChanges(order)
+            println("Success: order modified")
             sender() ! Response(0, "Success: order modified", None)
           case None =>
             sender() ! Response(1, "Failure: order not found", None)
@@ -197,9 +204,10 @@ object TSOrderService {
       case c: GetOrderById =>
         state.orders.get(c.orderId) match {
           case Some(order) =>
-            sender() ! Response(0, "Success", order)
+            println("======== orderOtherService: GetOrderByIdSuccess " )
+            sender() ! ResponseFindOrderById(order, c.deliveryId,c.requester,c.requestId,c.requestLabel,"OtherOrder", found = true)
           case None =>
-            sender() ! Response(1, "No order with that id", None)
+            sender() ! ResponseFindOrderById(null, c.deliveryId,c.requester,c.requestId,c.requestLabel,"OtherOrder")
         }
       case c:CheckSecurityAboutOrder =>
         val orders = state.orders.values.filter(order => order.accountId == c.accountId)
@@ -233,19 +241,25 @@ object TSOrderService {
         state.orders.get(c.orderId) match {
           case Some(order) =>
             persist(c)(updateState)
-            sender() ! Response(0, "Success: Delete", order)
+            sender() ! ResponseDeleteOrder(deleted = true, c.deliveryId,c.requester,c.requestId, c.requestLabel)
           case None =>
-            sender() ! Response(1, "No order with that id", None)
+            sender() ! ResponseDeleteOrder(deleted = false, c.deliveryId,c.requester,c.requestId, c.requestLabel)
+
+        }
+      case c:UpdateOrder =>
+        state.orders.get(c.order.id) match {
+          case Some(order) =>
+            saveChanges(c.order)
+            sender() ! ResponseUpdateOrder(c.deliveryId,c.requester,c.requestId,update = true,requestLabel=c.requestLabel)
+          case None =>
+            sender() ! ResponseUpdateOrder(c.deliveryId,c.requester,c.requestId,c.requestLabel)
         }
     }
 
     def saveChanges(order: Order): Unit = {
-      persist(Create(order))(updateState)
+      persist(Create(0,self,Random.nextInt(1000),order))(updateState)
 
     }
-
-
-
     def queryOrders(qi:OrderInfo, accountId: Int):List[Order] = { //1.Get all orders of the user
       val list = state.orders.values.filter(order =>order.accountId ==accountId)
       var finalList: List[Order] = List()
@@ -278,8 +292,6 @@ object TSOrderService {
       }
       finalList
     }
-
-
     def queryForStationId(queryIds: List[Int]):List[String]  = {
       var names: Option[List[String]] = None
       val responseFuture: Future[Any] = stationService ? QueryByIdBatchStation(queryIds)
@@ -287,9 +299,6 @@ object TSOrderService {
       if (response.status == 0) names = Some(response.data.asInstanceOf[List[String]])
       names.get
     }
-
-
-
   }
 
 }

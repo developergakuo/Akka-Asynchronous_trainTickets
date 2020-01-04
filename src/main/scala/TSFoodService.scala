@@ -2,10 +2,13 @@
 import TSCommon.Commons.{Response, _}
 import akka.actor.ActorRef
 import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotOffer}
+
 import scala.concurrent.duration._
 import akka.util.Timeout
 import akka.pattern.ask
+
 import scala.concurrent.{Await, Future}
+import scala.util.Random
 
 
 object TSFoodService {
@@ -27,7 +30,7 @@ object TSFoodService {
       super.postRestart(reason)
     }
 
-    override def persistenceId = "TravelService-id"
+    override def persistenceId = "FoodService-id"
 
     override def recovery: Recovery = super.recovery
 
@@ -41,7 +44,7 @@ object TSFoodService {
     }
 
     def updateState(evt: Evt): Unit = evt match {
-      case c: CreateFoodOrder ⇒ state = FoodOrderRepository(state.orders + (c.afoi.orderId -> c.afoi))
+      case c: CreateFoodOrder ⇒ state = FoodOrderRepository(state.orders + (c.fs.orderId -> c.fs))
       case c: DeleteFoodOrder => state = FoodOrderRepository(state.orders - c.orderId)
     }
 
@@ -50,14 +53,15 @@ object TSFoodService {
         println("Getting all food orders")
         sender() ! Response(0,"Success",state.orders.values.toList)
       case c:CreateFoodOrder=>
-        state.orders.get(c.afoi.orderId) match {
+        state.orders.get(c.fs.orderId) match {
           case Some(_) =>
             println("Error: food-order id already exists")
-            sender () ! Response(1, "Error: order id already exists", None)
+
+            sender() ! ResponseCreateFoodOrder(c.deliverId,c.requester,c.requestId,created = false)
 
           case None=>
             persist(c)(updateState)
-            sender() ! Response(0, "Success: added", None)
+            sender() ! ResponseCreateFoodOrder(c.deliverId,c.requester,c.requestId,created = true)
         }
 
       case c:DeleteFoodOrder =>
@@ -80,7 +84,7 @@ object TSFoodService {
       case c:UpdateFoodOrder =>
         state.orders.get(c.updateFoodOrder.orderId) match {
           case Some(_) =>
-            persist(CreateFoodOrder(c.updateFoodOrder))(updateState)
+            persist(CreateFoodOrder(0,self,Random.nextInt(1000),c.updateFoodOrder))(updateState)
             sender() ! Response(0, "Success: Updated", None)
           case None=>
             sender () ! Response(1, "Error: order id does not exist", None)
@@ -91,6 +95,7 @@ object TSFoodService {
 
       case c:GetAllFood =>
         var trainFoods: Option[List[TrainFood]]= None
+        //cut it here
         val responseFuture: Future[Any] = foodMapService ? ListTrainFoodByTripId(c.tripId)
         val response = Await.result(responseFuture,duration).asInstanceOf[Response]
         if (response.status == 0) trainFoods =Some(response.data.asInstanceOf[List[TrainFood]])
@@ -105,14 +110,14 @@ object TSFoodService {
             route match {
               case Some(r) =>
                 var startStationId: Option[Int] = None
-                val responseFuture: Future[Any] = stationService ? QueryForIdStation(c.startStation)
-                val response = Await.result(responseFuture, duration).asInstanceOf[Response]
-                if (response.asInstanceOf[Response].status == 0) startStationId = Some(response.asInstanceOf[Response].data.asInstanceOf[Int])
+                val responseFuture: Future[Any] = stationService ? QueryForIdStation(0,self,Random.nextInt(1000),c.startStation,-1)
+                val response = Await.result(responseFuture, duration).asInstanceOf[ResponseQueryForIdStation]
+                if (response.found) startStationId = Some(response.stationId)
 
                 var endStationId: Option[Int] = None
-                val response2Future: Future[Any] = stationService ? QueryForIdStation(c.endStation)
-                val response2 = Await.result(response2Future, duration).asInstanceOf[Response]
-                if (response2.asInstanceOf[Response].status == 0) endStationId = Some(response2.data.asInstanceOf[Int])
+                val response2Future: Future[Any] = stationService ? QueryForIdStation(0,self,Random.nextInt(1000),c.endStation,-1)
+                val response2 = Await.result(response2Future, duration).asInstanceOf[ResponseQueryForIdStation]
+                if (response2.found ) endStationId = Some(response2.stationId)
 
                 val stations: List[Int] = r.stations
                 val start = stations.indexOf(startStationId.get)

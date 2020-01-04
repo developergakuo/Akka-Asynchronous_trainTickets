@@ -28,7 +28,7 @@ object TSConsignService {
       super.postRestart(reason)
     }
 
-    override def persistenceId = "TravelService-id"
+    override def persistenceId = "ConsignService-id"
 
     override def recovery: Recovery = super.recovery
 
@@ -54,6 +54,7 @@ object TSConsignService {
 
           case None =>
             var price: Option[Double]= None
+            //cut it here
             val responseFuture: Future[Any] = consignPriceService ? GetPriceByWeightAndRegion(c.consignRequest.weight,c.consignRequest.isWithin)
             val response = Await.result(responseFuture,duration).asInstanceOf[Response]
             if (response.status == 0) price =Some(response.data.asInstanceOf[Double])
@@ -62,9 +63,10 @@ object TSConsignService {
                 val consignRecord = ConsignRecord(c.consignRequest.id,c.consignRequest.orderId,c.consignRequest.accountId,c.consignRequest.handleDate,
                   c.consignRequest.targetDate,c.consignRequest.from,c.consignRequest.to,c.consignRequest.consignee,c.consignRequest.phone,c.consignRequest.weight,prix)
                 persist(InsertConsignRecord2(consignRecord))(updateState)
-                sender() ! Response(0, "Success: Added", None )
+                sender() ! ResponseInsertConsignRecord(c.deliverId,c.requester,c.requestId,created = true)
+
               case None =>
-                sender() ! Response(1, "Error: not Added, try later", None )
+                sender() !  ResponseInsertConsignRecord(c.deliverId,c.requester,c.requestId,created = false)
             }
         }
 

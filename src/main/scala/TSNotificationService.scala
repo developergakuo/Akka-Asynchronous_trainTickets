@@ -1,16 +1,9 @@
 
 import TSCommon.Commons.{Response, _}
-import akka.actor.{Actor, ActorRef}
-import akka.pattern.ask
+import akka.actor. ActorRef
 import akka.persistence._
-import akka.util.Timeout
 
-import scala.concurrent.duration._
-import scala.concurrent.Future
-import scala.concurrent._
-import ExecutionContext.Implicits.global
 import scala.collection.mutable.ListBuffer
-import scala.util.{Failure, Success}
 
 
 object TSNotificationService {
@@ -28,7 +21,7 @@ class NotificationService extends PersistentActor with AtLeastOnceDelivery {
     super.postRestart(reason)
   }
 
-  override def persistenceId = "UserService-id"
+  override def persistenceId = "NotificationService-id"
 
   override def recovery: Recovery = super.recovery
 
@@ -45,7 +38,8 @@ class NotificationService extends PersistentActor with AtLeastOnceDelivery {
   }
 
   override def receiveCommand: Receive ={
-    case Preserve_success(info: NotifyInfo,receiver: ActorRef  )  =>
+    case c: Preserve_success  =>
+      val info = c.info
       val email = Mail(mailFrom="rainservice.com",
         mailto = info.email,mailSubject = "Preserve_success",
         model =Map("username"-> info.username,
@@ -56,39 +50,43 @@ class NotificationService extends PersistentActor with AtLeastOnceDelivery {
                     "seatClass"->info.seatClass,
                      "seatNumber"->info.seatNumber,
                      "price"->info.price))
-      persist(SaveMail(receiver,email))(updateState)
-      deliver(receiver.path)(deliveryId=> Response(0, "Success", PreservationSuccess(deliveryId,email)))
+      persist(SaveMail(c.receiver,email))(updateState)
+      sender ! RequestComplete(c.deliveryId,c.requester,c.requestId)
+      println("PreservationSuccess------")
+      deliver(c.requester.path)(deliveryId=> Response(0, "Success", PreservationSuccess(deliveryId,email)))
 
-    case Order_create_success(info: NotifyInfo,receiver: ActorRef) =>
+    case c:Order_create_success =>
       val email = Mail(mailFrom="rainservice.com",
-        mailto = info.email,mailSubject = "Order_create_success",
-        model =Map("username"-> info.username,
-          "startingPlace"->info.startingPlace,
-          "endPlace" ->info.endPlace,
-          "startingTime"->info.startingTime,
-          "date" ->info.date,
-          "seatClass"->info.seatClass,
-          "seatNumber"->info.seatNumber,
-          "price"->info.price))
-      persist(SaveMail(receiver,email))(updateState)
-      deliver(receiver.path)(deliveryId=> Response(0, "Success", OrderCreated(deliveryId,email)))
+        mailto = c.info.email,mailSubject = "Order_create_success",
+        model =Map("username"-> c.info.username,
+          "startingPlace"->c.info.startingPlace,
+          "endPlace" ->c.info.endPlace,
+          "startingTime"->c.info.startingTime,
+          "date" ->c.info.date,
+          "seatClass"->c.info.seatClass,
+          "seatNumber"->c.info.seatNumber,
+          "price"->c.info.price))
+      persist(SaveMail(c.receiver,email))(updateState)
+      sender ! RequestComplete(c.deliveryId,c.receiver,c.requestId)
+      deliver(c.receiver.path)(deliveryId=> Response(0, "Success", OrderCreated(deliveryId,email)))
 
-    case Order_changed_success(info: NotifyInfo,receiver: ActorRef ) =>
+    case c:Order_changed_success =>
       val email = Mail(mailFrom="rainservice.com",
-        mailto = info.email,mailSubject = "Order_changed_success",
-        model =Map("username"-> info.username,
-          "startingPlace"->info.startingPlace,
-          "endPlace" ->info.endPlace,
-          "startingTime"->info.startingTime,
-          "date" ->info.date,
-          "seatClass"->info.seatClass,
-          "seatNumber"->info.seatNumber,
-          "price"->info.price))
-      persist(SaveMail(receiver,email))(updateState)
-      deliver(receiver.path)(deliveryId=> Response(0, "Success", OrderChanged(deliveryId,email)))
+        mailto = c.info.email,mailSubject = "Order_changed_success",
+        model =Map("username"-> c.info.username,
+          "startingPlace"->c.info.startingPlace,
+          "endPlace" ->c.info.endPlace,
+          "startingTime"->c.info.startingTime,
+          "date" ->c.info.date,
+          "seatClass"->c.info.seatClass,
+          "seatNumber"->c.info.seatNumber,
+          "price"->c.info.price))
+      persist(SaveMail(c.receiver,email))(updateState)
+      sender ! RequestComplete(c.deliveryId,c.receiver,c.requestId)
+      deliver(c.receiver.path)(deliveryId=> Response(0, "Success", OrderChanged(deliveryId,email)))
 
 
-    case Order_cancel_success(info: NotifyInfo,receiver: ActorRef) =>
+    case Order_cancel_success(info: NotifyInfo,receiver: ActorRef,deliveryId,requestId) =>
       val email = Mail(mailFrom="rainservice.com",
         mailto = info.email,mailSubject = "Order_cancel_success",
         model =Map("username"-> info.username,
@@ -100,36 +98,40 @@ class NotificationService extends PersistentActor with AtLeastOnceDelivery {
           "seatNumber"->info.seatNumber,
           "price"->info.price))
       persist(SaveMail(receiver,email))(updateState)
+      sender ! RequestComplete(deliveryId,receiver,requestId)
       deliver(receiver.path)(deliveryId=> Response(0, "Success", OrderCanceled(deliveryId,email)))
 
 
-    case Order_Rebook_success(info: NotifyInfo,receiver: ActorRef) =>
+    case c:Order_Rebook_success =>
       val email = Mail(mailFrom="rainservice.com",
-        mailto = info.email,mailSubject = "Order_cancel_success",
-        model =Map("username"-> info.username,
-          "startingPlace"->info.startingPlace,
-          "endPlace" ->info.endPlace,
-          "startingTime"->info.startingTime,
-          "date" ->info.date,
-          "seatClass"->info.seatClass,
-          "seatNumber"->info.seatNumber,
-          "price"->info.price))
-      persist(SaveMail(receiver,email))(updateState)
-      deliver(receiver.path)(deliveryId=> Response(0, "Success", OrderRebooked(deliveryId,email)))
+        mailto = c.info.email,mailSubject = "Order_cancel_success",
+        model =Map("username"-> c.info.username,
+          "startingPlace"->c.info.startingPlace,
+          "endPlace" ->c.info.endPlace,
+          "startingTime"->c.info.startingTime,
+          "date" ->c.info.date,
+          "seatClass"->c.info.seatClass,
+          "seatNumber"->c.info.seatNumber,
+          "price"->c.info.price))
+      persist(SaveMail(c.receiver,email))(updateState)
+      sender ! RequestComplete(c.deliveryId,c.receiver,c.requestId)
+      deliver(c.receiver.path)(deliveryId=> Response(0, "Success", OrderRebooked(deliveryId,email)))
 
-    case Order_Paid_success(info: NotifyInfo,receiver: ActorRef) =>
+    case c:Order_Paid_success =>
       val email = Mail(mailFrom="rainservice.com",
-        mailto = info.email,mailSubject = "Order_cancel_success",
-        model =Map("username"-> info.username,
-          "startingPlace"->info.startingPlace,
-          "endPlace" ->info.endPlace,
-          "startingTime"->info.startingTime,
-          "date" ->info.date,
-          "seatClass"->info.seatClass,
-          "seatNumber"->info.seatNumber,
-          "price"->info.price))
-      persist(SaveMail(receiver,email))(updateState)
-      deliver(receiver.path)(deliveryId=> Response(0, "Success", OrderPaid(deliveryId,email)))
+        mailto = c.info.email,mailSubject = "Order_cancel_success",
+        model =Map("username"-> c.info.username,
+          "startingPlace"->c.info.startingPlace,
+          "endPlace" ->c.info.endPlace,
+          "startingTime"->c.info.startingTime,
+          "date" ->c.info.date,
+          "seatClass"->c.info.seatClass,
+          "seatNumber"->c.info.seatNumber,
+          "price"->c.info.price))
+      persist(SaveMail(c.receiver,email))(updateState)
+      sender ! RequestComplete(c.deliveryId,c.receiver,c.requestId)
+
+      deliver(c.receiver.path)(deliveryId=> Response(0, "Success", OrderPaid(deliveryId,email)))
 
     case ConfirmMailDelivery(deliverId: Long)=>
       confirmDelivery(deliverId)

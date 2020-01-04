@@ -19,13 +19,15 @@ object TSTravelPlanService {
         val queryInfoFirstSection: TripInfo= TripInfo(c.trasnferTravelInfo.fromStationName,
             c.trasnferTravelInfo.viaStationName,
             c.trasnferTravelInfo.travelDate)
-        val firstSectionFromHighSpeed: List[TripResponse] = tripsFromHighSpeed(queryInfoFirstSection)
-        val firstSectionFromNormal: List[TripResponse] =  tripsFromNormal(queryInfoFirstSection)
+        val firstSectionFromHighSpeed: List[TripResponse] = tripsFromHighSpeed(queryInfoFirstSection,c.requester,c.requestId)
+        val firstSectionFromNormal: List[TripResponse] =  tripsFromNormal(queryInfoFirstSection,c.requester,c.requestId)
+
+        //cut it here
         val queryInfoSecondSection: TripInfo= TripInfo(c.trasnferTravelInfo.viaStationName,
             c.trasnferTravelInfo.toStationName,
             c.trasnferTravelInfo.travelDate)
-        val secondSectionFromHighSpeed: List[TripResponse] = tripsFromHighSpeed(queryInfoSecondSection)
-        val secondSectionFromNormal: List[TripResponse] =  tripsFromNormal(queryInfoSecondSection)
+        val secondSectionFromHighSpeed: List[TripResponse] = tripsFromHighSpeed(queryInfoSecondSection,c.requester,c.requestId)
+        val secondSectionFromNormal: List[TripResponse] =  tripsFromNormal(queryInfoSecondSection,c.requester,c.requestId)
         val firstSection:List[TripResponse] = firstSectionFromHighSpeed:::firstSectionFromNormal
         val secondSection: List[TripResponse] = secondSectionFromHighSpeed ::: secondSectionFromNormal
         sender() ! Response(0,"Success", TransferTravelResult(firstSection,secondSection))
@@ -157,17 +159,17 @@ object TSTravelPlanService {
       routePlanResultUnits.get
     }
 
-    def tripsFromHighSpeed(info: TripInfo): List[TripResponse]  = {
+    def tripsFromHighSpeed(info: TripInfo,requester: ActorRef, requestId: Int): List[TripResponse]  = {
       var result: Option[List[TripResponse]] = None
-      val responseFuture = travelService ? QueryTravel(info)
+      val responseFuture = travelService ? QueryTravel(0,requester,requestId,info)
       val response = Await.result(responseFuture, duration).asInstanceOf[Response]
       if(response.status == 0) result = Some(response.data.asInstanceOf[List[TripResponse]])
       result.get
     }
 
-    def tripsFromNormal(info: TripInfo): List[TripResponse] = {
+    def tripsFromNormal(info: TripInfo, requester: ActorRef, requestId: Int): List[TripResponse] = {
       var result: Option[List[TripResponse]] = None
-      val responseFuture: Future[Any] = travel2service ? QueryTravel(info)
+      val responseFuture: Future[Any] = travel2service ? QueryTravel(0,requester,requestId,info)
       val response = Await.result(responseFuture, duration).asInstanceOf[Response]
       if(response.status == 0) result = Some(response.data.asInstanceOf[List[TripResponse]])
       result.get

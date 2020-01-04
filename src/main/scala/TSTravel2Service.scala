@@ -1,22 +1,34 @@
 import TSCommon.Commons.{Response, _}
 import akka.actor.ActorRef
-import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotOffer}
+import akka.persistence._
 import akka.pattern.ask
-import akka.util.Timeout
 import InputData._
 
-import scala.concurrent.duration._
 import scala.concurrent.Future
 import scala.concurrent.Await
-import scala.util.{Failure, Success}
 import java.util.{Calendar, Date}
+
+import scala.collection.mutable.ListBuffer
+
 
 
 object TSTravel2Service{
+
+  case class QueryTravelState(requests: Map[(String,ActorRef,Int),(List[TripResponses],List[TripResponse]  )])
+
+  case class TripResponses(var startingPlaceName: String = "", var endPlaceName: String = "", var startingPlaceId: Int = -1,
+                           var endPlaceId: Int = -1, var travelResult: Option[TravelResult] = None,
+                           var trip: Option[Trip] = None, depatureTime: Option[Date] = Some(new Date()),
+                           var soldTicket: Option[SoldTicket]=None, var temRoute: Option[Route] = None)
+  case class GetTripAllDetailInfoState(requests: Map[(String,ActorRef,Int),(TripResponses,List[TripResponse]  )])
+
+  case class TravelServiceState(tripRepository: TripRepository, queryTravelState: QueryTravelState, getTripAllDetailInfoState: GetTripAllDetailInfoState)
+
   case class TripRepository(trips: Map[Int, Trip])
   class Travel2Service(routeService: ActorRef , trainService: ActorRef , trainTicketInfoService: ActorRef ,
-                      orderOtherService: ActorRef,SeatService: ActorRef ) extends PersistentActor {
-    var state: TripRepository = TripRepository(trips.zipWithIndex.map(a => a._2+1 ->a._1).toMap)
+                      orderOtherService: ActorRef,SeatService: ActorRef ) extends PersistentActor  with  AtLeastOnceDelivery{
+
+    var state: TravelServiceState = TravelServiceState(TripRepository(trips.zipWithIndex.map(a => a._2+1 ->a._1).toMap),QueryTravelState(Map()),GetTripAllDetailInfoState(Map()) )
     override def preStart(): Unit = {
       println("TravelService prestart")
       super.preStart()
@@ -33,7 +45,7 @@ object TSTravel2Service{
     override def recovery: Recovery = super.recovery
 
     override def receiveRecover: Receive = {
-      case SnapshotOffer(_, offeredSnapshot: TripRepository) ⇒ state = offeredSnapshot
+      case SnapshotOffer(_, offeredSnapshot: TravelServiceState) ⇒ state = offeredSnapshot
       case RecoveryCompleted =>
         println("TravelService RecoveryCompleted")
 
@@ -50,24 +62,177 @@ object TSTravel2Service{
             c.travelInfo.routeId, c.travelInfo.startingTime,
             c.travelInfo.startingStationId, c.travelInfo.stationsId,
             c.travelInfo.terminalStationId)
-        state = TripRepository(state.trips + (c.travelInfo.tripId -> trip))
+        state = TravelServiceState(TripRepository(state.tripRepository.trips + (c.travelInfo.tripId -> trip) ),
+          state.queryTravelState, state.getTripAllDetailInfoState)
 
       case c: UpdateTravel =>
         state =
-          TripRepository(state.trips + (c.travelInfo.tripId ->
+          TravelServiceState(TripRepository(state.tripRepository.trips + (c.travelInfo.tripId ->
             Trip(c.travelInfo.tripId, c.travelInfo.trainTypeId,
               c.travelInfo.routeId, c.travelInfo.startingTime,
               c.travelInfo.startingStationId, c.travelInfo.stationsId,
-              c.travelInfo.terminalStationId)))
+              c.travelInfo.terminalStationId))),state.queryTravelState,state.getTripAllDetailInfoState)
       case c: DeleteTravel =>
-        state = TripRepository(state.trips - c.tripId)
+        state = TravelServiceState(TripRepository(state.tripRepository.trips - c.tripId), state.queryTravelState, state.getTripAllDetailInfoState)
+      case c: GetTripAllDetailInfo =>
+        var (_,responses )= state.getTripAllDetailInfoState.requests.getOrElse(("GetTripAllDetailInfo", c.requester, c.requestId), (TripResponses(),List()))
+        responses = TripResponse():: responses
+        val qState =
+          TripResponses(startingPlaceName = c.gtdi.from, endPlaceName = c.gtdi.to,
+            startingPlaceId = queryForStationId(c.gtdi.from).get,endPlaceId = queryForStationId(c.gtdi.to).get,
+            trip = Some(c.tempTrip.get), temRoute = c.temRoute,depatureTime = Some(c.gtdi.travelDate))
+        state = TravelServiceState(state.tripRepository, state.queryTravelState,
+          GetTripAllDetailInfoState(state.getTripAllDetailInfoState.requests + (("GetTripAllDetailInfo", c.requester, c.requestId) -> (qState,responses))))
+
+      case c: QueryTravel =>
+        println("c-trip: "+ c.trip_route)
+        println("persisted: "+ c)
+        println("1: " + c.requester +"  "+ c.RequestId)
+        var (_,responses )= state.queryTravelState.requests.getOrElse(("QueryTravel", sender(), c.RequestId), (List(),List()))
+        println("QueryTravel here: "+" "+ responses)
+        println("QueryTravel here: "+" "+ responses)
+        val trip_route = c.trip_route
+        val qstates = trip_route.map(a =>
+          TripResponses(startingPlaceName = c.tripInfo.startingPlace,
+            startingPlaceId = queryForStationId(c.tripInfo.startingPlace).get,
+            endPlaceName = c.tripInfo.endPlace, trip =Some(a._1) ,
+            endPlaceId = queryForStationId(c.tripInfo.endPlace).get,
+            temRoute = Some(a._2), depatureTime =Some(c.tripInfo.departureTime)))
+
+        state = TravelServiceState(state.tripRepository,QueryTravelState(state.queryTravelState.requests + (("QueryTravel", sender(), c.RequestId) -> (qstates,responses))),
+          state.getTripAllDetailInfoState)
+        println("requests1: "+state.queryTravelState.requests)
+      case c: ResponseQueryForTravel =>
+        confirmDelivery(c.deliveryID)
+        if (c.found) {
+          if (c.requestLabel.equals("QueryTravel")) {
+            println("ResponseQueryForTravel: "+c.travel)
+            println("2: " +c.requester +"  "+ c.requestId + " "+ c.tripId)
+            println("qstates: "+state.queryTravelState.requests.get(("QueryTravel", c.requester, c.requestId)).get._1)
+            val qstate = state.queryTravelState.requests.get(("QueryTravel", c.requester, c.requestId)).get._1.filter(q=>q.trip.get.tripId == c.tripId).head
+            println("Custome qstate: "+ qstate.trip.get.tripId)
+            qstate.travelResult = Some(c.travel)
+            deliver(orderOtherService.path)(deliveryId => QueryAlreadySoldOrders(qstate.depatureTime.get, qstate.trip.get.tripId, deliveryId, c.requester, c.requestId, c.requestLabel, c.label,c.sender))
+
+          }
+          else if(c.requestLabel.equals("GetTripAllDetailInfo")){
+            val qstate = state.getTripAllDetailInfoState.requests.get((c.requestLabel, c.requester, c.requestId)).get._1
+            qstate.travelResult = Some(c.travel)
+            deliver(orderOtherService.path)(deliveryId =>
+              QueryAlreadySoldOrders(qstate.depatureTime.get, qstate.trip.get.tripId, deliveryId, c.requester, c.requestId, c.requestLabel, c.label,c.sender))
+
+          }
+        }
+      case c: ResponseQueryAlreadySoldOrders =>
+        confirmDelivery(c.deliveryId)
+        if (c.found) {
+          var pre_qstate: Option[TripResponses] = None
+          var pre_response: Option[TripResponse] = None
+          if (c.requestLabel.equals("QueryTravel")){
+            println("Missing: "+c.tripId)
+            pre_qstate = Some(state.queryTravelState.requests.get((c.requestLabel, c.requester, c.requestId)).get._1.filter(q=>q.trip.get.tripId == c.tripId).head)
+            pre_response = Some(TripResponse())
+            println("Thelabel soldTicket: " + c.soldTicket)
+          }
+          else if(c.requestLabel.equals("GetTripAllDetailInfo")){
+            pre_qstate = Some(state.getTripAllDetailInfoState.requests.get((c.requestLabel, c.requester, c.requestId)).get._1)
+            pre_response = Some(state.getTripAllDetailInfoState.requests.get((c.requestLabel, c.requester, c.requestId)).get._2.head)
+
+          }
+          val response = pre_response.get
+          val qstate = pre_qstate.get
+          println("qstate trip: "+ qstate.trip)
+          val soldTicket = c.soldTicket
+          qstate.soldTicket = Some(soldTicket)
+          val startingPlaceId = qstate.startingPlaceId
+          val startingPlaceName = qstate.startingPlaceName
+          val endPlaceId = qstate.endPlaceId
+          val endPlaceName = qstate.endPlaceName
+          val trip = qstate.trip.get
+          val departureTime = qstate.depatureTime
+          val route = qstate.temRoute.get
+          println("Route:  "+ route)
+          val travelResult = qstate.travelResult.get
+
+
+          if (startingPlaceId.equals(trip.startingStationId) && endPlaceId.equals(trip.terminalStationId)) {
+            response.confortClass = 50
+            response.economyClass = 50
+          }
+          else {
+            response.confortClass = 50
+            response.economyClass = 50
+          }
+          val first = getRestTicketNumber(departureTime.get, trip.tripId,
+            startingPlaceName, endPlaceName, SeatClass().firstClass._1)
+          val second = getRestTicketNumber(departureTime.get, trip.tripId,
+            startingPlaceName, endPlaceName, SeatClass().secondClass._1)
+          response.confortClass = first.get
+          response.economyClass = second.get
+          response.startingStation = startingPlaceName
+          response.terminalStation = endPlaceName
+          val indexStart: Int = route.stations.indexOf(startingPlaceId)
+          val indexEnd: Int = route.stations.indexOf(endPlaceId)
+          println("Travel2service:getTickets->Route: " + route)
+          println("Travel2service:getTickets->start and end: " + startingPlaceId + " "+ endPlaceId)
+          println("Travel2service:getTickets->indexEnd: " + indexEnd)
+          println("Travel2service:getTickets->indexStart: " + indexStart)
+
+          val distanceStart: Int = route.distances(indexStart) - route.distances.head
+          val distanceEnd: Int = route.distances(indexEnd) - route.distances.head
+          val trainType: TrainType = getTrainType(trip.trainTypeId).get
+          val minutesStart: Int = 60 * distanceStart / trainType.averageSpeed
+          val minutesEnd: Int = 60 * distanceEnd / trainType.averageSpeed
+          val calendarStart: Calendar = Calendar.getInstance
+          calendarStart.setTime(trip.startingTime)
+          calendarStart.add(Calendar.MINUTE, minutesStart)
+          response.startingTime = calendarStart.getTime
+          val calendarEnd: Calendar = Calendar.getInstance
+          calendarEnd.setTime(trip.startingTime)
+          calendarEnd.add(Calendar.MINUTE, minutesEnd)
+          response.endTime = calendarEnd.getTime
+          response.tripId = soldTicket.trainNumber
+          response.trainTypeId = trip.trainTypeId
+          response.priceForConfortClass = travelResult.prices.get("confortClass").get
+          response.priceForEconomyClass = travelResult.prices.get("economyClass").get
+          if(c.requestLabel.equals("QueryTravel")){
+            println("Thelabel response: " + response)
+
+
+          }
+          if (c.requestLabel.equals("QueryTravel")){
+            var (qstates,responses )= state.queryTravelState.requests.getOrElse(("QueryTravel", c.requester, c.requestId), (List(),List()))
+            responses = response :: responses
+            println("custome responses:"+ responses )
+            state = TravelServiceState(state.tripRepository,QueryTravelState(state.queryTravelState.requests + (("QueryTravel", c.requester, c.requestId) -> (qstates,responses))),
+              state.getTripAllDetailInfoState)
+            if(responses.size == qstates.size) {
+              println("QueryTravel complete")
+              println(c.requester)
+              c.requester ! Response(0, "Success", responses)
+              //state = TravelServiceState(state.tripRepository,QueryTravelState (state.queryTravelState.requests - (("QueryTravel", c.requester, c.RequestId))),
+              //state.getTripAllDetailInfoState)
+            }
+          }
+
+          if(c.requestLabel.equals("GetTripAllDetailInfo")){
+            c.sender match {
+              case Some(ref) =>  ref ! ResponseGetTripAllDetailInfo(c.deliveryId,c.requester,c.requestId,TripAllDetail(response,qstate.trip.get),found = true,label = c.label)
+              case None =>  c.requester ! ResponseGetTripAllDetailInfo(c.deliveryId,c.requester,c.requestId,TripAllDetail(response,qstate.trip.get),found = true,label = c.label)
+            }
+            state = TravelServiceState(state.tripRepository,state.queryTravelState,
+              GetTripAllDetailInfoState(state.getTripAllDetailInfoState.requests - (("GetTripAllDetailInfo",c.requester,c.requestId))))
+          }
+        }
+
+
 
     }
 
 
     override def receiveCommand: Receive = {
       case c: CreateTravel =>
-        if (state.trips.contains(c.travelInfo.tripId)) {
+        if (state.tripRepository.trips.contains(c.travelInfo.tripId)) {
           sender() ! Response(1, "Trip allready exist", None)
         }
         else {
@@ -76,7 +241,7 @@ object TSTravel2Service{
         }
 
       case RetrieveTravel(tripId: Int) =>
-        val trip: Option[Trip] = state.trips.get(tripId)
+        val trip: Option[Trip] = state.tripRepository.trips.get(tripId)
         trip match {
           case Some(trp) =>
             sender() ! Response(0, "Success", trp)
@@ -84,7 +249,7 @@ object TSTravel2Service{
             sender() ! Response(1, "No trip by that id", None)
         }
       case c: UpdateTravel =>
-        state.trips.get(c.travelInfo.tripId) match {
+        state.tripRepository.trips.get(c.travelInfo.tripId) match {
           case Some(_) =>
             persist(c)(updateState)
             sender() ! Response(0, "Success", None)
@@ -93,7 +258,7 @@ object TSTravel2Service{
         }
 
       case c: DeleteTravel =>
-        state.trips.get(c.tripId) match {
+        state.tripRepository.trips.get(c.tripId) match {
           case Some(_) =>
             persist(c)(updateState)
             sender() ! Response(0, "Success", None)
@@ -101,53 +266,62 @@ object TSTravel2Service{
             sender() ! Response(1, "No trip found", None)
         }
       case c: QueryTravel =>
-        val startingPlaceName = c.tripInfo.startingPlace
-        val endPlaceName = c.tripInfo.endPlace
-        val startingPlaceId = queryForStationId(startingPlaceName).get
-        val endPlaceId = queryForStationId(endPlaceName).get
-        var tripResponses: List[TripResponse] = List()
-        for (tripEntry <- state.trips) {
+        val startingPlaceId = queryForStationId(c.tripInfo.startingPlace).get
+        val endPlaceId = queryForStationId(c.tripInfo.endPlace).get
+        var trips: List[(Trip,Route)] = List()
+        for (tripEntry <- state.tripRepository.trips) {
           val tempRoute = getRouteByRouteId(tripEntry._2.routeId).get
           if (tempRoute.stations.contains(startingPlaceId) &&
             tempRoute.stations.contains(endPlaceId) &&
             tempRoute.stations.indexOf(startingPlaceId) < tempRoute.stations.indexOf(endPlaceId)) {
-            val response: TripResponse = getTickets(tripEntry._2, tempRoute, startingPlaceId,
-              endPlaceId, startingPlaceName, endPlaceName, c.tripInfo.departureTime).get
-            tripResponses = response :: tripResponses
+            println("viable trip" + tripEntry._2)
+            trips = (tripEntry._2 , tempRoute):: trips
+            println("persisintng "+ c)
+            persistAsync(c)(updateState)
+
           }
         }
-        sender() ! Response(0, "Success", tripResponses)
+        c.trip_route = trips
+        persist(c)(updateState)
+        trips.foreach({ a =>
+          executeTickets(sender(),c.RequestId,"QueryTravel",a._1, a._2, startingPlaceId,
+            endPlaceId, c.tripInfo.startingPlace, c.tripInfo.endPlace, c.tripInfo.departureTime, "",None)
+        })
+
+
+      case c: ResponseQueryForTravel =>
+        persistAsync(c)(updateState)
+
+      case c: QueryAlreadySoldOrders =>
+        persist(c)(updateState)
+
+      case c:ResponseQueryAlreadySoldOrders =>
+        persist(c)(updateState)
+
+      case c: QueryTravelComplete=>
+        persist(c)(updateState)
+
 
       case c: GetTripAllDetailInfo =>
-        import TSCommon.Commons.TripAllDetail
-        var gtdr: TripAllDetail = null
-        state.trips.get(c.gtdi.tripId) match {
+        state.tripRepository.trips.get(c.gtdi.tripId) match {
           case Some(trip) =>
             val startingPlaceName = c.gtdi.from
             val endPlaceName = c.gtdi.to
             val startingPlaceId = queryForStationId(startingPlaceName)
             val endPlaceId = queryForStationId(endPlaceName)
             val tempRoute = getRouteByRouteId(trip.routeId).get
-            val response = getTickets(trip, tempRoute, startingPlaceId.get,
-              endPlaceId.get, startingPlaceName, endPlaceName, c.gtdi.travelDate)
-            response  match {
-              case Some(result) =>
-                gtdr = TripAllDetail(result, trip)
-                println("GetTripAllDetailInfo success")
-                sender() ! Response(0, "Success", gtdr)
-              case None =>
-                sender() ! Response(1, "no tickets found", gtdr)
-
-            }
-
-
+            c.temRoute = Some(tempRoute)
+            c.tempTrip = Some(trip)
+            persist(c)(updateState)
+            executeTickets(c.requester,c.requestId,"GetTripAllDetailInfo",trip, tempRoute, startingPlaceId.get,
+              endPlaceId.get, startingPlaceName, endPlaceName, c.gtdi.travelDate, c.label,c.sender)
           case None =>
-            sender() ! Response(1, "no trip found", gtdr)
+            sender() ! ResponseGetTripAllDetailInfo(c.deliveryId,c.requester,c.requestId,null, found=false, label = c.label,c.sender)
         }
 
 
       case GetRouteByTripId(tripId: Int) =>
-        state.trips.get(tripId) match {
+        state.tripRepository.trips.get(tripId) match {
           case Some(trip) =>
             getRouteByRouteId(trip.routeId) match {
               case Some(route) => sender() ! Response(0, "Success", route)
@@ -159,7 +333,7 @@ object TSTravel2Service{
 
 
       case GetTrainTypeByTripId(tripId: Int) =>
-        state.trips.get(tripId) match {
+        state.tripRepository.trips.get(tripId) match {
           case Some(trip) =>
             getTrainType(trip.trainTypeId) match {
               case Some(trainType) =>
@@ -171,7 +345,7 @@ object TSTravel2Service{
             sender() ! Response(1, "No trip found", None)
         }
       case QueryAllTravel =>
-        sender() ! Response(0, "success", state.trips.values.toList)
+        sender() ! Response(0, "success", state.tripRepository.trips.values.toList)
       case c: GetTripByRoute =>
 
         var tripList: List[Trip] = List()
@@ -183,7 +357,7 @@ object TSTravel2Service{
         else sender() ! Response(1, "No Content", None)
       case AdminQueryAll =>
         var adminTrips: List[AdminTrip] = List()
-        for (trip <- state.trips.values) {
+        for (trip <- state.tripRepository.trips.values) {
 
           val adminTrip = AdminTrip(trip, getTrainType(trip.trainTypeId).get, getRouteByRouteId(trip.routeId).get)
 
@@ -202,69 +376,20 @@ object TSTravel2Service{
       id
     }
 
-    def getTickets(trip: Trip, route: Route, startingPlaceId: Int, endPlaceId: Int, startingPlaceName: String,
-                   endPlaceName: String, departureTime: Date): Option[TripResponse] = {
+
+    def executeTickets(requester: ActorRef, requestId: Int,requestLabel: String,trip: Trip, route: Route, startingPlaceId: Int, endPlaceId: Int, startingPlaceName: String,
+                       endPlaceName: String, departureTime: Date, label: String, sender: Option[ActorRef]): Unit = {
       if (!afterToday(departureTime)) None
-      println("TRIP: "+trip)
-      println("Route: "+ route)
-      println("from: "+ startingPlaceName+ " "+ startingPlaceId)
-      println("to: "+ endPlaceName+ " "+ endPlaceId)
-
+      println("TRIP: " + trip)
+      println("Route: " + route)
+      println("from: " + startingPlaceName + " " + startingPlaceId)
+      println("to: " + endPlaceName + " " + endPlaceId)
       val travel = Travel(trip, startingPlaceName, endPlaceName, departureTime)
-      val response = TripResponse()
-      val travelResultResponseFuture: Future[Any] = trainTicketInfoService ? QueryForTravel(travel)
-      val travelResultResponse = Await.result(travelResultResponseFuture,duration).asInstanceOf[Response]
-      if (travelResultResponse.status == 0) {
-        val travelResult = travelResultResponse.data.asInstanceOf[TravelResult]
-        var soldTicket: SoldTicket = null
-        val soldTicketResponseFuture: Future[Any] = orderOtherService ? QueryAlreadySoldOrders(travelDate = departureTime, trainNumber = trip.tripId)
-        val soldTicketResponse = Await.result(soldTicketResponseFuture,duration).asInstanceOf[Response]
-        if (soldTicketResponse.status == 0)
-          soldTicket = soldTicketResponse.data.asInstanceOf[SoldTicket]
-        if (queryForStationId(startingPlaceName).get.equals(trip.startingStationId) && queryForStationId(endPlaceName).get.equals(trip.terminalStationId)) {
-          response.confortClass = 50
-          response.economyClass = 50
-        }
-        else {
-          response.confortClass = 50
-          response.economyClass = 50
-        }
-        val first = getRestTicketNumber(departureTime, trip.tripId,
-          startingPlaceName, endPlaceName, SeatClass().firstClass._1)
-        val second = getRestTicketNumber(departureTime, trip.tripId,
-          startingPlaceName, endPlaceName, SeatClass().secondClass._1)
-        response.confortClass = first.get
-        response.economyClass = second.get
-        response.startingStation = startingPlaceName
-        response.terminalStation = endPlaceName
-        val indexStart: Int = route.stations.indexOf(startingPlaceId)
-        val indexEnd: Int = route.stations.indexOf(endPlaceId)
-        println("Travel2service:getTickets->Route: "+ route)
-        println("Travel2service:getTickets->Route: "+ route)
-        println("Travel2service:getTickets->indexEnd: "+ indexEnd)
-        println("Travel2service:getTickets->indexStart: "+ startingPlaceId)
-
-        val distanceStart: Int = route.distances(indexStart) - route.distances.head
-        val distanceEnd: Int = route.distances(indexEnd) - route.distances.head
-        val trainType: TrainType = getTrainType(trip.trainTypeId).get
-        val minutesStart: Int = 60 * distanceStart / trainType.averageSpeed
-        val minutesEnd: Int = 60 * distanceEnd / trainType.averageSpeed
-        val calendarStart: Calendar = Calendar.getInstance
-        calendarStart.setTime(trip.startingTime)
-        calendarStart.add(Calendar.MINUTE, minutesStart)
-        response.startingTime = calendarStart.getTime
-        val calendarEnd: Calendar = Calendar.getInstance
-        calendarEnd.setTime(trip.startingTime)
-        calendarEnd.add(Calendar.MINUTE, minutesEnd)
-        response.endTime = calendarEnd.getTime
-        response.tripId = soldTicket.trainNumber
-        response.trainTypeId = trip.trainTypeId
-        response.priceForConfortClass = travelResult.prices.get("confortClass").get
-        response.priceForEconomyClass = travelResult.prices.get("economyClass").get
-        println("getTickets Success")
-        Some(response)
-      } else None
+      deliver(trainTicketInfoService.path)(deliveryId => QueryForTravel(deliveryId, requester, requestId, travel, requestLabel,label=label, sender ))
     }
+
+
+
 
     def afterToday(date: Date): Boolean = {
       val calDateA = Calendar.getInstance
@@ -318,7 +443,7 @@ object TSTravel2Service{
     }
 
     def getTripsByRouteId(routeId: Int): List[Trip] = {
-      state.trips.values.filter(trip => trip.routeId == routeId).toList
+      state.tripRepository.trips.values.filter(trip => trip.routeId == routeId).toList
     }
 
   }

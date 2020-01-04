@@ -6,10 +6,10 @@ import akka.util.Timeout
 import scala.concurrent.duration._
 import scala.concurrent.Future
 import scala.concurrent.Await
-
 import scala.collection.mutable.ListBuffer
-
 import TSCommon.Commons
+
+import scala.util.Random
 object TSRoutePlanService {
   class RoutePlanService ( orderService: ActorRef , orderOtherService: ActorRef , configService: ActorRef , travelService: ActorRef ,
                              travel2Service: ActorRef , stationService: ActorRef , routeService: ActorRef) extends Actor {
@@ -17,8 +17,8 @@ object TSRoutePlanService {
       case c:SearchCheapestResult =>
         println("======== routeplan: SearchCheapest: ")
         val tripInfo = TripInfo(c.info.fromStationName,c.info.toStationName,c.info.travelDate)
-        val highSpeed = getTripFromHighSpeedTravelService(tripInfo)
-        val normalTrain = getTripFromNormalTrainTravelService(tripInfo)
+        val highSpeed = getTripFromHighSpeedTravelService(tripInfo,c.requester,c.requestId)
+        val normalTrain = getTripFromNormalTrainTravelService(tripInfo,c.requester,c.requestId)
         val finalResult:scala.collection.mutable.ListBuffer[TripResponse] = (highSpeed ++ normalTrain).to[ListBuffer]
         var minPrice = .0
         var minIndex = -1
@@ -69,10 +69,10 @@ object TSRoutePlanService {
 
       case  c:SearchQuickestResult=>
         val tripInfo = TripInfo(c.info.fromStationName,c.info.toStationName,c.info.travelDate)
-        val highSpeed = getTripFromHighSpeedTravelService(tripInfo)
-        val normalTrain = getTripFromNormalTrainTravelService(tripInfo)
+        val highSpeed = getTripFromHighSpeedTravelService(tripInfo,c.requester,c.requestId)
+        val normalTrain = getTripFromNormalTrainTravelService(tripInfo,c.requester,c.requestId)
         val finalResult: ListBuffer[TripResponse] = (highSpeed ++ normalTrain).to[ListBuffer]
-
+   //cut it from here
         var minTime = 0L
         var minIndex = -1
         val size = Math.min(finalResult.size, 5)
@@ -123,6 +123,7 @@ object TSRoutePlanService {
       case c: SearchMinStopStations =>
         val fromStationId = queryForStationId(c.info.fromStationName)
         val toStationId = queryForStationId(c.info.toStationName)
+        //cut it here
 
 
         var routeListResp: Option[List[Route]] = None
@@ -195,9 +196,9 @@ object TSRoutePlanService {
           if (trip.tripId == 1|| trip.tripId == 2) service = travelService
           else service = travel2Service
           var tripAllDetail: Option[TripAllDetail] = None
-          val responseFuture: Future[Any] = service ? GetTripAllDetailInfo(allDetailInfo)
-          val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-          if (response.status == 0) tripAllDetail = Some(response.data.asInstanceOf[TripAllDetail])
+          val responseFuture: Future[Any] = service ? GetTripAllDetailInfo(0,c.requester,c.requestId,allDetailInfo)
+          val response = Await.result(responseFuture,duration).asInstanceOf[ResponseGetTripAllDetailInfo]
+          if (response.found) tripAllDetail = Some(response.gtdr)
           val tripResponse: TripResponse = tripAllDetail.get.tripResponse
           val unit = RoutePlanResultUnit(trip.tripId,tripResponse.trainTypeId,tripResponse.startingStation,
                tripResponse.terminalStation,getRouteByRouteId(trip.tripId).stations,tripResponse.priceForEconomyClass
@@ -223,22 +224,23 @@ object TSRoutePlanService {
       result.get
     }
 
-    private def getTripFromHighSpeedTravelService(info: TripInfo):List[TripResponse]  = {
+    private def getTripFromHighSpeedTravelService(info: TripInfo, requester: ActorRef,requestId: Int ):List[TripResponse]  = {
       println("============ getTripFromHighSpeedTravelService")
       var result: Option[List[TripResponse]]= None
-      val responseFuture: Future[Any] = travelService ? QueryTravel(info)
+      val responseFuture: Future[Any] = travelService ?
+        QueryTravel(Random.nextLong(),self,requestId,info)
       val response = Await.result(responseFuture,duration).asInstanceOf[Response]
       if (response.status == 0) {
-        ("============ getTripFromHighSpeedTravelService: Success")
+        println("============ getTripFromHighSpeedTravelService: Success")
         result = Some(response.data.asInstanceOf[List[TripResponse]])
       }
 
       result.get
     }
 
-    private def getTripFromNormalTrainTravelService(info: Commons.TripInfo):List[TripResponse] = {
+    private def getTripFromNormalTrainTravelService(info: Commons.TripInfo,requester: ActorRef,requestId: Int):List[TripResponse] = {
       var result: Option[List[TripResponse]]= None
-      val responseFuture: Future[Any] = travel2Service ? QueryTravel(info)
+      val responseFuture: Future[Any] = travel2Service ? QueryTravel(Random.nextLong(),requester,requestId,info)
       val response = Await.result(responseFuture,duration).asInstanceOf[Response]
       if (response.status == 0) result = Some(response.data.asInstanceOf[List[TripResponse]])
       result.get

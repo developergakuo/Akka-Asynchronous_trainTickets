@@ -2,9 +2,7 @@ import TSCommon.Commons._
 import akka.actor.ActorRef
 import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotOffer}
 import akka.pattern.ask
-import akka.util.Timeout
 
-import scala.concurrent.duration._
 import scala.concurrent.Future
 import scala.concurrent.Await
 import java.util. Date
@@ -30,7 +28,7 @@ object TSSecurityService {
       super.postRestart(reason)
     }
 
-    override def persistenceId = "TravelService-id"
+    override def persistenceId = "SecurityService-id"
 
     override def recovery: Recovery = super.recovery
 
@@ -97,10 +95,10 @@ object TSSecurityService {
         val configMaxNotUse = securityRepositoryfindByName("max_order_not_use")
         val oneHourLine = configMaxInHour
         val totalValidLine = configMaxNotUse
-        if (orderInOneHour > oneHourLine || totalValidOrder > totalValidLine) sender()  !  Response(1, "Too much order in last one hour or too much valid order", c.accountId)
+        if (orderInOneHour > oneHourLine || totalValidOrder > totalValidLine) sender()  !  SecurityCheckResponse(c.requester, c.requestId,c.deliveryId, isSecure = false, c.accountId)
         else {
           println("orders secure")
-          sender() ! Response(0, "Success", c.accountId)
+          sender() ! SecurityCheckResponse(c.requester,c.requestId,c.deliveryId, isSecure = true, c.accountId)
         }
     }
 

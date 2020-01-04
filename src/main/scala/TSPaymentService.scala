@@ -21,7 +21,7 @@ object TSPaymentService {
       super.postRestart(reason)
     }
 
-    override def persistenceId = "TravelService-id"
+    override def persistenceId = "PaymentService-id"
 
     override def recovery: Recovery = super.recovery
 

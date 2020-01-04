@@ -18,7 +18,7 @@ object TSAuthService {
       super.postRestart(reason)
     }
 
-    override def persistenceId = "UserService-Client-id"
+    override def persistenceId = "AuthService-id"
 
     override def recovery: Recovery = super.recovery
 

@@ -113,9 +113,9 @@ object TSUserService {
       case c:FindByUserId2 =>
         state.users.get(c.userId) match {
           case Some(usr) =>
-            sender() ! Response(0,"Success",usr)
+            sender() ! ResponseFindByUserId2(c.deliverId,c.requester,c.requestId,Some(usr))
           case None =>
-            sender() ! Response(1,"user does not exist",None)
+            sender() ! ResponseFindByUserId2(c.deliverId,c.requester,c.requestId,None)
         }
       case c:CreateDefaultAuthUser =>
         val response: Future[Any] = authService ? c

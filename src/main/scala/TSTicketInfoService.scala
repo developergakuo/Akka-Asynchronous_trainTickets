@@ -21,9 +21,11 @@ object TSTicketInfoService {
         val response = Await.result(responseFuture,duration).asInstanceOf[Response]
         if(response.status == 0) {
           println("======== TicketInfoService: Querry for travel: Success")
-          sender() ! Response(0,"Success",response.data.asInstanceOf[TravelResult])
+          val resp =
+            ResponseQueryForTravel(c.deliveryID,c.requester,c.requestId,response.data.asInstanceOf[TravelResult], found = true,c.requestLabel,c.label,c.sender, c.travel.trip.tripId)
+          sender() ! resp
         }
-        else sender() ! Response(1,"failed",response.data)
+        else sender() ! ResponseQueryForTravel(c.deliveryID,c.requester,c.requestId,null, found = false, c.requestLabel, c.label,c.sender)
       case c:QueryForStationId =>
         val responseFuture: Future[Any] = basicService ? c
         val response = Await.result(responseFuture,duration).asInstanceOf[Response]

@@ -19,7 +19,7 @@ object TSConfigService {
       super.postRestart(reason)
     }
 
-    override def persistenceId = "TravelService-id"
+    override def persistenceId = "ConfigService-id"
 
     override def recovery: Recovery = super.recovery
 

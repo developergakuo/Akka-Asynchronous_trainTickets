@@ -15,11 +15,11 @@ class  PaymentTestSpec() extends TestKit(ActorSystem("WebshopTest")) with Implic
   }
   "A client actor" must {
     "return orderPaid message on paying a valid order" in {
-      client ! ClientLogin("userName1", "psw1")
+      client ! ClientLogin("userName2", "psw2")
       client ! ClientPay(exampleOtherOrderUnpaid)
       expectMsgType[OrderPaid]
       val orderFuture = orderOtherService ? GetOrderById(exampleOtherOrderUnpaid.id)
-      val paidOrder = Await.result(orderFuture,duration).asInstanceOf[Response].data.asInstanceOf[Order]
+      val paidOrder = Await.result(orderFuture,duration).asInstanceOf[ResponseFindOrderById].order
       println("Order status: "+paidOrder.status)
       client ! ClientRebook(paidOrder, trips(paidOrder.trainNumber-1))
       expectMsgType[OrderRebooked]

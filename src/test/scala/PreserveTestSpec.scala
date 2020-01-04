@@ -19,7 +19,9 @@ class  PreserveTestSpec() extends TestKit(ActorSystem("WebshopTest")) with Impli
       client ! ClientPreserve("station1", "station4", new Date(), 5,SeatClass().secondClass._1)
       adminOrderService ! GetAllOrders()
       adminFoodOrderService ! GetAllOrders()
-      receiveN(3)
+     val messages = receiveN(3)
+      println( "messsages-----------: "+ messages)
+
     }
   }
 }

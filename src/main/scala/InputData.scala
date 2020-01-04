@@ -78,8 +78,10 @@ object InputData {
     Account(8,"userName8","psw8","Male",1,1,"userr8@Tservice.com"),
     Account(9,"userName9","psw9","Other",1,1,"userr9@Tservice.com"))
   val money: Double = 100.00
+  val money2: Double = 0.00
+
   val moneyType = MoneyType().D
-  val moneys = List(Money2(1,money,moneyType),Money2(2,money,moneyType),Money2(3,money,moneyType),Money2(4,money,moneyType),Money2(5,money,moneyType),Money2(6,money,moneyType),Money2(7,money,moneyType),Money2(8,money,moneyType),Money2(9,money,moneyType),Money2(10,money,moneyType))
+  val moneys = List(Money2(1,money2,moneyType),Money2(2,money,moneyType),Money2(3,money,moneyType),Money2(4,money,moneyType),Money2(5,money,moneyType),Money2(6,money,moneyType),Money2(7,money,moneyType),Money2(8,money,moneyType),Money2(9,money,moneyType),Money2(10,money,moneyType))
 // case  class Order(var id: Int, boughtDate: Date, travelDate: Date, travelTime: Date, accountId: Int,
 // contactsName: String, var documentType: Int = -1, var contactsDocumentNumber: Int = -1, var trainNumber: Int = -1,
 // var coachNumber: Int = -1, var seatClass: Int = -1, var seatNumber: Int = -1, var from: Int = -1, var to: Int = -1,

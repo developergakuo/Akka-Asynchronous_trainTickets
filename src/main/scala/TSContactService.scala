@@ -18,7 +18,7 @@ object TSContactService {
       super.postRestart(reason)
     }
 
-    override def persistenceId = "TravelService-id"
+    override def persistenceId = "ContactService-id"
 
     override def recovery: Recovery = super.recovery
 
@@ -72,10 +72,10 @@ object TSContactService {
       case c:FindContactsById =>
         state.contacts.get(c.id) match {
           case Some(contcts) =>
-            sender() ! Response(0, "Found", contcts)
+            sender() ! ContactResponse(c.deliveryId,c.requester,c.requestNo, true, Some(contcts))
 
           case None =>
-            sender() ! Response(1, "Error: contact does not exists", None)
+            sender() ! ContactResponse(c.deliveryId,c.requester,c.requestNo, false, None)
         }
 
       case c:FindContactsByAccountId =>

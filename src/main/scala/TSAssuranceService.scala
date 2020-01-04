@@ -1,7 +1,6 @@
  import TSCommon.Commons.{Response, _}
  import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotOffer}
- import akka.util.Timeout
- import scala.concurrent.duration._
+
 
  object TSAssuranceService {
 
@@ -21,7 +20,7 @@
        super.postRestart(reason)
      }
 
-     override def persistenceId = "TravelService-id"
+     override def persistenceId = "AssuranceService-id"
 
      override def recovery: Recovery = super.recovery
 
@@ -59,11 +58,12 @@
        case c: CreateAssurance =>
          val at = AssuranceType().assuranceTypes.filter(at => at._1 == c.typeIndex)
          val assurance = state.assurances.values.filter(a => a.orderId == c.orderId).toList
-         if (assurance.nonEmpty) sender() ! Response(1, "Assurance already exists", None)
-         else if (at.isEmpty) sender() ! Response(1, "Assurance type does not exists", None)
+         if (assurance.nonEmpty) sender() ! ResponseCreateAssurance(c.deliveryId, c.requester, c.requestId,created = false)
+         else if (at.isEmpty) sender() ! ResponseCreateAssurance(c.deliveryId, c.requester, c.requestId,created = false)
          else {
            persist(CreateAssurance2(c.orderId, at.head))(updateState)
-           sender() ! Response(0, "Success", None)
+           ResponseCreateAssurance
+           sender() ! ResponseCreateAssurance(c.deliveryId, c.requester, c.requestId,created = true)
          }
 
        case c: DeleteById =>

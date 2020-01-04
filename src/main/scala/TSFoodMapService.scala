@@ -20,7 +20,7 @@ object TSFoodMapService {
       super.postRestart(reason)
     }
 
-    override def persistenceId = "TravelService-id"
+    override def persistenceId = "FoodMapService-id"
 
     override def recovery: Recovery = super.recovery
 

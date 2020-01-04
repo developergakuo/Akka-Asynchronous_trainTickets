@@ -4,7 +4,6 @@ version := "0.1"
 
 scalaVersion := "2.12.7"
 val akkaVersion = "2.4.19"
-val scalaMetaVersion = "4.1.0"
 
 // the library is available in Bintray repository
 resolvers += "dnvriend" at "http://dl.bintray.com/dnvriend/maven"

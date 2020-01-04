@@ -85,16 +85,16 @@ object TSExecuteService {
      def getOrderByIdFromOrder(orderId: Int): Option[Order] = {
       var order: Option[Order] = None
       val responseFuture: Future[Any] = orderService ? GetOrderById(orderId)
-       val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-       if (response.status == 0) order = Some(response.data.asInstanceOf[Order])
+       val response = Await.result(responseFuture,duration).asInstanceOf[ResponseFindOrderById]
+       if (response.found) order = Some(response.order)
       order
     }
 
      def getOrderByIdFromOrderOther(orderId: Int):Option[Order] = {
        var order: Option[Order] = None
        val responseFuture: Future[Any] = orderOtherService ? GetOrderById(orderId)
-       val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-       if (response.status == 0) order = Some(response.data.asInstanceOf[Order])
+       val response = Await.result(responseFuture,duration).asInstanceOf[ResponseFindOrderById]
+       if (response.found ) order = Some(response.order)
        order
     }
   }

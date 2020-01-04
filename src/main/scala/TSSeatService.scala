@@ -31,7 +31,7 @@ object TSSeatService {
       super.postRestart(reason)
     }
 
-    override def persistenceId = "TravelService-id"
+    override def persistenceId = "SeatService-id"
 
     override def recovery: Recovery = super.recovery
 
@@ -125,13 +125,14 @@ object TSSeatService {
            val ticket = Ticket(seat,startStation,c.seat.destStation)
           val soldTickets = lti.soldTickets
           if  (soldTickets.contains(ticket)) {
-            sender() ! Response(1,"Error: Seat Already taken", None)
+            sender() ! ResponseDistributeSeat(c.deliveryId,c.requester,c.requestId,c.seat.seatType, null, found = false,c.label)
           }
           else
-            sender() ! Response(0,"Success: Seat preserved", ticket)
+            println("DistributeSeat Success")
+            sender() ! ResponseDistributeSeat(c.deliveryId,c.requester,c.requestId,c.seat.seatType, ticket, found = true,c.label)
 
          case None => // Do nothing
-           sender() ! Response(1,"Error: Fetching soldTickets", None)
+           sender() ! ResponseDistributeSeat(c.deliveryId,c.requester,c.requestId,c.seat.seatType, null, found = false,c.label)
        }
 
       case c:GetLeftTicketOfInterval =>

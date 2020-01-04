@@ -59,7 +59,7 @@ object Services  {
   val userService : ActorRef = system.actorOf(Props(classOf[UserService],authService), "userService")
   val seatService : ActorRef = system.actorOf(Props(classOf[SeatService],orderService,orderOtherService,configService,routeService,trainService), "seatService")
   val travel2Service : ActorRef = system.actorOf(Props(classOf[Travel2Service],routeService , trainService , ticketInfoService ,
-    orderService,seatService ), "travel2service")
+    orderOtherService,seatService ), "travel2service")
   val travelService : ActorRef = system.actorOf(Props(classOf[TravelService],routeService,trainService,ticketInfoService,
     orderOtherService,seatService), "travelService")
   val routePlanService : ActorRef =  system.actorOf(Props(classOf[RoutePlanService],orderService,orderOtherService,configService,

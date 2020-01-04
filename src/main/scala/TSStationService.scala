@@ -84,7 +84,7 @@ object TSStationService {
         station match {
           case Some(stn) =>
             println("=================stationService:QueryForIdStation: Success " + c.stationName)
-            sender() ! Response(0,"Success",stn.id)
+            sender() ! ResponseQueryForIdStation(c.deliveryId,c.requester,c.requestId,stn.id, true,c.toOrFRom)
           case None =>
             sender() ! Response(1,"Error: Station not found",None)
 

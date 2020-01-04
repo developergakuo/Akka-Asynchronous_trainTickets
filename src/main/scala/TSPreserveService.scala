@@ -1,220 +1,281 @@
 import TSCommon.Commons.{Response, _}
-import akka.actor.{Actor, ActorRef}
-import akka.pattern.ask
-import akka.util.Timeout
-import scala.concurrent.duration._
-import scala.concurrent.Future
-import scala.concurrent.Await
+import akka.actor. ActorRef
+import akka.persistence._
 import java.util. Date
 
-
 object TSPreserveService {
-  class PreserveService (ticketInfoService: ActorRef ,
-                              securityService: ActorRef , contactService:  ActorRef , travelService: ActorRef , stationService: ActorRef , seatService: ActorRef ,
-                              orderService: ActorRef ,assuranceService: ActorRef ,
-                              foodService: ActorRef , consignService: ActorRef , userService: ActorRef , notifyService: ActorRef) extends Actor {
+  case class Service(var oti: Option[OrderTicketsInfo2] = None, var getContactsById: Option[Contacts] = None,var tripAllDetail: Option[TripAllDetail] = None,
+                     var fromStationId: Int = -1, var toStationId: Int = -1, var resultForTravel: Option[TravelResult] = None, var ticket: Option[Ticket] = None,
+                     var orderCreated: Option[Order] = None, var checkSecurity:  Boolean = false,var  createFoodOrder: Boolean = false,
+                     var consignRequest: Boolean = false, var addAssuranceForOrder: Boolean =false, var account: Option[Account] = None,
+                     var consigned: Boolean = false)
 
+  case class PreserveOtherServiceState(requests: Map[(ActorRef,Int),Service])
 
-    override def receive: Receive = {
-      case Preserve(oti: OrderTicketsInfo2) =>
-        //checkOrder security
-        if (!checkSecurity(oti.accountId)) {
-          sender() ! Response(1, "Security Error", None)
+  class PreserveService (ticketInfoService: ActorRef,
+                         securityService: ActorRef, contactService:  ActorRef, travelService: ActorRef,
+                         stationService: ActorRef, seatService: ActorRef, orderOtherService: ActorRef,
+                         assuranceService: ActorRef, foodService: ActorRef, consignService: ActorRef,
+                         userService: ActorRef, notifyService: ActorRef) extends PersistentActor with AtLeastOnceDelivery {
+
+    var state: PreserveOtherServiceState = PreserveOtherServiceState(Map())
+
+    override def preStart(): Unit = {
+      println("UserService prestart")
+      super.preStart()
+    }
+
+    override def postRestart(reason: Throwable): Unit = {
+      println("UserService post restart")
+      println(reason)
+      super.postRestart(reason)
+    }
+
+    override def persistenceId = "PreserveService-id"
+
+    override def recovery: Recovery = super.recovery
+
+    override def receiveRecover: Receive = {
+      case SnapshotOffer(_, offeredSnapshot: PreserveOtherServiceState) ⇒ state = offeredSnapshot
+      case RecoveryCompleted =>
+        println("UserService RecoveryCompleted")
+      case x: Evt ⇒
+        println("recovering: " + x)
+        updateState(x)
+    }
+
+    def updateState(evt: Evt): Unit = evt match {
+      case e: Preserve ⇒
+        e.actorRef ! PreservationDelivered(e.deliveryId)
+        val service = state.requests.getOrElse((e.actorRef, e.orderNumber), Service())
+        service.oti = Some(e.oti)
+        state =PreserveOtherServiceState (state.requests + ((e.actorRef, e.orderNumber) -> service))
+        deliver(securityService.path)(deliveryId => Check(e.actorRef, e.orderNumber, deliveryId, e.oti.accountId))
+      case e: SecurityCheckResponse =>
+        confirmDelivery(e.deliveryId)
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+        println("service:"+ service)
+        service.checkSecurity = e.isSecure
+
+        if (e.isSecure) deliver(contactService.path)(deliveryId => FindContactsById(deliveryId, e.requester, e.requestId, service.oti.get.contactsId))
+        else e.requester ! Response(1, "Order not Secured", None)
+
+      case e: ContactResponse =>
+        confirmDelivery(e.deliveryId)
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+        service.getContactsById = e.contacts
+        e.contacts match {
+          case Some(contacts) =>
+            service.getContactsById = Some(contacts)
+            val gtdi: TripAllDetailInfo =
+              TripAllDetailInfo(service.oti.get.tripId, service.oti.get.date, service.oti.get.from, service.oti.get.to)
+            deliver(travelService.path)(deliveryId => GetTripAllDetailInfo(deliveryId, e.requester, e.requestId, gtdi, sender = Some(self) ))
+          case None =>
+            e.requester ! Response(1, "User contacts not found", None)
+
         }
-        else {
-          //get contacts
-          getContactsById(oti.contactsId) match {
-            case Some(contacts) =>
-              val gtdi: TripAllDetailInfo = TripAllDetailInfo(oti.tripId, oti.date, oti.from, oti.to)
-              getTripAllDetailInformation(gtdi) match {
-                case Some(gtdr) =>
-                  val tripResponse: TripResponse = gtdr.tripResponse
-                  //enough Seats?
-                  if ((oti.seatType == SeatClass().firstClass._1) && (tripResponse.confortClass == 0))
-                    sender() ! Response(1, "First class seats not enough", None)
-                  else if ((tripResponse.economyClass == SeatClass().secondClass._1) && (tripResponse.confortClass == 0))
-                    sender() ! Response(1, "Economy class seats not enough", None)
-                  else {
-                    val trip: Trip = gtdr.trip
-                    val fromStationId: Int = queryForStationId(oti.from).get
-                    val toStationId: Int = queryForStationId(oti.to).get
-                    //make order
-                    val order: Order = Order(id = scala.util.Random.nextInt(100000), boughtDate = new Date(),
-                      status = OrderStatus().NOTPAID._1, contactsDocumentNumber = contacts.documentNumber,
-                      documentType = contacts.documentType, contactsName = contacts.name, from = fromStationId,
-                      to = toStationId, trainNumber = oti.tripId, accountId = oti.accountId, seatClass = oti.seatType,
-                      travelDate = oti.date, travelTime = gtdr.tripResponse.startingTime)
-                    val query: Travel = Travel(trip, oti.from, oti.to, new Date())
-                    // Check if the route exists etc
-                    val responseFuture: Future[Any] = ticketInfoService ? QueryForTravel(query)
-                    val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-                    if (response.status == 0) {
-                          val resultForTravel: TravelResult = response.data.asInstanceOf[TravelResult]
-                          if (oti.seatType == SeatClass().firstClass._1) {
-                            //Dispatch the seat 1st class
-                            val ticket: Ticket = dispatchSeat(oti.date, order.trainNumber, fromStationId, toStationId, SeatClass().firstClass._1).get
-                            order.seatNumber = ticket.seatNo
-                            order.seatClass = SeatClass().firstClass._1
-                            order.price = resultForTravel.prices.get("comfortClass").get
-                          }
-                          else {
-                            //Dispatch the seat 2nd class
-                            val ticket: Ticket = dispatchSeat(oti.date, order.trainNumber, fromStationId, toStationId, SeatClass().secondClass._1).get
-                            order.seatNumber = ticket.seatNo
-                            order.seatClass = SeatClass().secondClass._1
-                            order.price = resultForTravel.prices.get("economyClass").get
-                          }
-                          createOrder(order) match {
-                            case Some(ord) =>
-                              //Assure the order
-                              if (!(oti.assurance == 0)) { //insure
-                                addAssuranceForOrder(oti.assurance, ord.id) match {
-                                  case Some(int) =>
-                                    if (int != 0) {
-                                      sender() ! Response(1, "Insurance creation error:", None)
-                                    }
-                                  case None =>
-                                    sender() ! Response(1, "Insurance creation error:", None)
-                                }
-                                // create food order
-                                if (oti.foodType != 0) {
-                                  val foodOrder: FoodOrder = FoodOrder(orderId = ord.id, foodType = oti.foodType, price = oti.foodPrice, foodName = oti.foodName)
-                                  if (oti.foodType == 2) {
-                                    foodOrder.stationName = oti.stationName
-                                    foodOrder.storeName = oti.storeName
-                                  }
-                                  createFoodOrder(foodOrder) match {
-                                    case Some(code) =>
-                                      if (code != 0) {
-                                        // buy food fail
-                                        sender() ! Response(1, "FoodOrder creation error:", None)
-                                      }
-                                    case None =>
-                                    // buy food fail
-                                      sender() ! Response(1, "FoodOrder creation error:", None)
-                                  }
-                                }
-                                // consignee business
-                                if (null != oti.consigneeName && !("" == oti.consigneeName)) {
-                                  val consignRequest: Consign = Consign(orderId = ord.id, accountId = ord.accountId,
-                                    handleDate = oti.handleDate, targetDate = ord.travelDate, from = ord.from, to = ord.to,
-                                    consignee = oti.consigneeName, phone = oti.consigneePhone, weight = oti.consigneeWeight,
-                                    isWithin = oti.isWithin)
-                                  createConsign(consignRequest) match {
-                                    case Some(codeConsignresp) =>
-                                      if (codeConsignresp != 0) {
-                                        //consign Fail
-                                        sender() ! Response(1, "Consign creation error:", None)
-                                      }
-                                    case None =>
-                                      //consign Fail
-                                      sender() ! Response(1, "Consign creation error:", None)
-                                  }
-                                }
-                                //Successful preservation, Notify client
-                                getAccount(order.accountId) match {
-                                  case Some(account) =>
-                                    val notifyInfo: NotifyInfo = NotifyInfo(account.email, order.id, account.userName, order.from, order.to, order.travelTime, new Date, order.seatClass, order.seatNumber, order.price)
-                                    notifyService ! Preserve_success(notifyInfo,sender())
-                                  case None =>
-                                    sender() ! Response(1, "Account fetch  error...Notification error:", None)
-                                }
-                              }
-                            case None =>
-                              sender() ! Response(1, "order creation error:", None)
-                          }
-
-                    }
-                    else{
-                          sender() ! Response(1, "Trip is not Feasible:", None)
-                        }
-                  }
-                case None =>
-                  sender() ! Response(1, "Trip all detail info Error", None)
-              }
-            case None =>
-              sender() ! Response(1, "Contacts Error", None)
-
+      case e: ResponseGetTripAllDetailInfo =>
+        confirmDelivery(e.deliveryId)
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+        service.tripAllDetail = Some(e.gtdr)
+        if (e.found) {
+          if ((service.oti.get.seatType == SeatClass().firstClass._1) && (e.gtdr.tripResponse.confortClass == 0))
+            sender() ! Response(1, "First class seats not enough", None)
+          else if ((e.gtdr.tripResponse.economyClass == SeatClass().secondClass._1) && (e.gtdr.tripResponse.confortClass == 0))
+            sender() ! Response(1, "Economy class seats not enough", None)
+          else {
+            deliver(stationService.path)(deliveryId => QueryForIdStation(deliveryId, e.requester, e.requestId, service.oti.get.from, 1))
+            deliver(stationService.path)(deliveryId => QueryForIdStation(deliveryId, e.requester, e.requestId, service.oti.get.to, 2))
           }
         }
+        else sender() ! Response(1, "Trip all detail info Error", None)
+
+      case e: ResponseQueryForIdStation =>
+        confirmDelivery(e.deliveryId)
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+        if (e.toOrFRom == 1) service.toStationId = e.stationId
+        else if (e.toOrFRom == 2) service.fromStationId = e.stationId
+        //Are to and from stations set?
+        if (service.toStationId != -1 && service.fromStationId != -1) {
+          val contacts = service.getContactsById.get
+          val trip: Trip = service.tripAllDetail.get.trip
+          val oti = service.oti.get
+          val order: Order = Order(id = scala.util.Random.nextInt(100000), boughtDate = new Date(),
+            status = OrderStatus().NOTPAID._1, contactsDocumentNumber = contacts.documentNumber,
+            documentType = contacts.documentType, contactsName = contacts.name, from = service.fromStationId,
+            to = service.toStationId, trainNumber = oti.tripId, accountId = oti.accountId, seatClass = oti.seatType,
+            travelDate = service.oti.get.date, travelTime = service.tripAllDetail.get.tripResponse.startingTime)
+          service.orderCreated = Some(order)
+          val query: Travel = Travel(trip, oti.from, oti.to, new Date())
+          deliver(ticketInfoService.path)(deliveryID => QueryForTravel(deliveryID, e.requester, e.requestId, query))
+        }
+      case e: ResponseQueryForTravel =>
+        confirmDelivery(e.deliveryID)
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+        if (e.found)  {
+          service.resultForTravel = Some(e.travel)
+          val oti = service.oti.get
+          val order = service.orderCreated.get
+          val fromStationId = service.fromStationId
+          val toStationId = service.toStationId
+          if (oti.seatType == SeatClass().firstClass._1) {
+            //Dispatch the seat 1st class
+            val seat = Seat( oti.date, order.trainNumber, fromStationId, toStationId, SeatClass().firstClass._1)
+            deliver(seatService.path)(deliveryId => DistributeSeat(deliveryId, e.requester, e.requestId, seat))
+          }
+          else {
+            //Dispatch the seat 2nd class
+            val seat = Seat( oti.date, order.trainNumber, fromStationId, toStationId, SeatClass().secondClass._1)
+            deliver(seatService.path)(deliveryId => DistributeSeat(deliveryId, e.requester, e.requestId, seat))
+
+          }
+
+        }
+        else sender() ! Response(1, "Trip is not feasible:", None)
+      case e: ResponseDistributeSeat =>
+        println("distribute seat success resp")
+        confirmDelivery(e.deliveryId)
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+        val order = service.orderCreated.get
+        if (e.found)  {
+          if (e.seatClass == 1){
+            order.seatNumber = e.ticket.seatNo
+            order.seatClass = SeatClass().firstClass._1
+            order.price = service.resultForTravel.get.prices.get("comfortClass").get
+          }
+          else if (e.seatClass == 2){
+            order.seatNumber = e.ticket.seatNo
+            order.seatClass = SeatClass().secondClass._1
+            order.price = service.resultForTravel.get.prices.get("comfortClass").get
+          }
+        }
+
+        deliver(orderOtherService.path)(deliveryID => Create(deliveryID, e.requester, e.requestId, order))
+      case e: ResponseCreate =>
+        println("order create resp")
+
+        confirmDelivery(e.deliveryId)
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+        if (e.created) {
+          val oti = service.oti.get
+          if (!(oti.assurance == 0)) { //insure
+            deliver(assuranceService.path)(deliveryId => CreateAssurance(deliveryId, e.requester, e.requestId, oti.assurance, e.newOrder.id)
+            )
+          }
+
+          else sender() ! Response(1, "order creation error:", None)
+        }
+
+      case e: ResponseCreateAssurance =>
+        println("assurance create resp")
+
+        confirmDelivery(e.deliveryId)
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+        if (e.created) {
+          val oti = service.oti.get
+          val ord = service.orderCreated.get
+          // create food order
+          if (oti.foodType != 0) {
+            println("Preserving food ")
+            val foodOrder: FoodOrder = FoodOrder(orderId = ord.id, foodType = oti.foodType, price = oti.foodPrice, foodName = oti.foodName)
+            if (oti.foodType == 2) {
+              foodOrder.stationName = oti.stationName
+              foodOrder.storeName = oti.storeName
+            }
+            deliver(foodService.path)(deliverId => CreateFoodOrder(deliverId, e.requester,e.requestId,foodOrder))
+          }
+
+        }
+        else sender() ! Response(1, "Assurance creation error:", None)
+
+      case e: ResponseCreateFoodOrder =>
+
+        println("ResponseCreateFoodOrder create resp")
+        confirmDelivery(e.deliverId)
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+        if(e.created){
+          val oti = service.oti.get
+          val ord = service.orderCreated.get
+          // consignee business
+          if (null != oti.consigneeName && !("" == oti.consigneeName)) {
+            println("Also needs consignment")
+            val consignRequest: Consign = Consign(orderId = ord.id, accountId = ord.accountId,
+              handleDate = oti.handleDate, targetDate = ord.travelDate, from = ord.from, to = ord.to,
+              consignee = oti.consigneeName, phone = oti.consigneePhone, weight = oti.consigneeWeight,
+              isWithin = oti.isWithin)
+            deliver(consignService.path)(deliverId => InsertConsignRecord(deliverId, e.requester,e.requestId,consignRequest))
+          }
+
+        }
+        else sender() ! Response(1, "FoodOrder creation error:", None)
+      case e: ResponseInsertConsignRecord =>
+        println("ResponseInsertConsignRecord create resp")
+
+        confirmDelivery(e.deliverId)
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+        if(e.created){
+          service.consigned = true
+        }
+        else sender() ! Response(1, "Consign creation error:", None)
+        deliver(userService.path)(deliverId => FindByUserId2(deliverId, e.requester,e.requestId,service.orderCreated.get.accountId))
+
+      case e:ResponseFindByUserId2 =>
+        confirmDelivery(e.deliverId)
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+        e.account match {
+          case Some(account) =>
+            val order = service.orderCreated.get
+            service.account =  e.account
+            val notifyInfo: NotifyInfo = NotifyInfo(account.email, order.id, account.userName, order.from, order.to,
+              order.travelTime, new Date, order.seatClass, order.seatNumber, order.price)
+            deliver(notifyService.path)(deliverId => Preserve_success(deliverId, e.requester,e.requestId,notifyInfo,sender()))
+          case None =>
+            sender() !   Response(1, "User Account not Found:", None)
+        }
+
+      case e: RequestComplete =>
+        confirmDelivery(e.deliveryId)
+        state = PreserveOtherServiceState(state.requests - ((e.Requester,e.requestId)))
     }
 
+    override def receiveCommand: Receive = {
+      case c:Preserve=>
+        persistAsync(c)(updateState)
+      //check order securitys
+      case c: SecurityCheckResponse =>
+        persistAsync(c)(updateState)
 
-    def checkSecurity(accountId: Int): Boolean ={
-      var safe: Boolean = false
-      val responseFuture: Future[Any] = securityService ? Check(accountId)
-      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-      if (response.status == 0) safe = true
-      safe
-    }
-    def getContactsById(contactsId: Int): Option[Contacts] ={
-      var contacts: Option[Contacts] = None
-      val responseFuture: Future[Any] = contactService ? FindContactsById(contactsId)
-      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-      if (response.status == 0) contacts = Some(response.data.asInstanceOf[Contacts])
-      contacts
-    }
+      case c: ContactResponse =>
+        persistAsync(c)(updateState)
 
-    def getTripAllDetailInformation(gtdi: TripAllDetailInfo): Option[TripAllDetail]={
-      var tripAllDetail: Option[TripAllDetail] = None
-      val responseFuture: Future[Any] = travelService ? GetTripAllDetailInfo(gtdi)
-      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-      if (response.status == 0) tripAllDetail = Some(response.data.asInstanceOf[TripAllDetail])
-      tripAllDetail
-    }
+      case c: ResponseGetTripAllDetailInfo =>
+        persistAsync(c)(updateState)
 
-    def queryForStationId(stationName: String): Option[Int] ={
-      var stationId: Option[Int] = None
-      val responseFuture: Future[Any] = stationService ? QueryForIdStation(stationName)
-      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-      if (response.status == 0) stationId = Some(response.data.asInstanceOf[Int])
-      stationId
-    }
+      case c: ResponseQueryForIdStation =>
+        persistAsync(c)(updateState)
 
-    def dispatchSeat(date: Date, trainNumber: Int, fromStationId: Int, toStationId: Int, seatClass:Int): Option[Ticket] ={
-      var ticket: Option[Ticket] = None
-      val seat = Seat(date,trainNumber,fromStationId,toStationId,seatClass)
-      val responseFuture: Future[Any] = seatService ? DistributeSeat(seat)
-      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-      if (response.status == 0) ticket = Some(response.data.asInstanceOf[Ticket])
-      ticket
-    }
-    def createOrder(order: Order): Option[Order] ={
-      var ord: Option[Order] = None
-      val responseFuture: Future[Any] = orderService ? Create(order)
-      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-      if (response.status == 0) ord = Some(response.data.asInstanceOf[Order])
-      ord
-    }
-    def addAssuranceForOrder(assuranceType:Int, orderId:Int):Option[Int]={
-      var assuranceResp: Option[Int] = None
-      val responseFuture: Future[Any] = assuranceService ? CreateAssurance(assuranceType,orderId)
-      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-      if(response.status ==0) assuranceResp = Some(response.data.asInstanceOf[Int])
-      assuranceResp
-    }
+      case c: ResponseQueryForTravel =>
+        persistAsync(c)(updateState)
 
-    def createFoodOrder(foodOrder: FoodOrder): Option[Int] ={
-      var foodOrderResp: Option[Int] = None
-      val responseFuture: Future[Any] = foodService ? CreateFoodOrder(foodOrder)
-      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-      if (response.status == 0) foodOrderResp = Some(0)
-      foodOrderResp
-    }
-    def createConsign(consignRequest: Consign): Option[Int] ={
-      var consignResp: Option[Int] = None
-      val responseFuture: Future[Any] = consignService ? InsertConsignRecord(consignRequest)
-      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-      if (response.status == 0) consignResp = Some(0)
-      consignResp
-    }
+      case c:ResponseDistributeSeat =>
+        persistAsync(c)(updateState)
 
-    def getAccount(accountId: Int): Option [Account] ={
-      var user: Option[Account] = None
-      val responseFuture: Future[Any] = userService ? FindByUserId2(accountId)
-      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-      if (response.status == 0) user = Some(response.data.asInstanceOf[Account])
-      user
+      case c: ResponseCreate =>
+        persistAsync(c)(updateState)
+
+      case c: ResponseCreateAssurance =>
+        persistAsync(c)(updateState)
+
+      case c: ResponseCreateFoodOrder =>
+        persistAsync(c)(updateState)
+
+      case c: ResponseInsertConsignRecord =>
+        persistAsync(c)(updateState)
+      case c:ResponseFindByUserId2 =>
+        persistAsync(c)(updateState)
+      case c: RequestComplete =>
+        persistAsync(c)(updateState)
+
     }
 
   }

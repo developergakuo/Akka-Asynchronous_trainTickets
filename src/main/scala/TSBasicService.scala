@@ -2,9 +2,12 @@ import TSCommon.Commons._
 import akka.actor.ActorRef
 import akka.persistence.{PersistentActor, Recovery, RecoveryCompleted, SnapshotOffer}
 import akka.util.Timeout
+
 import scala.concurrent.Future
 import scala.concurrent.Await
 import akka.pattern.ask
+
+import scala.util.Random
 object TSBasicService {
   case class UserRepository(users: Map[Int,User])
   class BasicService (stationService: ActorRef , trainService: ActorRef , routeService: ActorRef , priceService: ActorRef) extends PersistentActor {
@@ -21,7 +24,7 @@ object TSBasicService {
       super.postRestart(reason)
     }
 
-    override def persistenceId = "UserService-Client-id"
+    override def persistenceId = "BasicService-id"
 
     override def recovery: Recovery = super.recovery
 
@@ -47,6 +50,8 @@ object TSBasicService {
       case c:QueryForTravel =>
         val startingPlaceExist = checkStationExists(c.travel.startingPlace)
         val endPlaceExist = checkStationExists(c.travel.endPlace)
+
+        //cut it here
         if (!startingPlaceExist || !endPlaceExist) {
           sender ! Response(1,"There is no travel route between the two stations",None)
         }else{
@@ -96,17 +101,17 @@ object TSBasicService {
 
     def queryForStationId(stationName: String): Option[Int] = {
       var staionId:Option[Int] = None
-      val responseFuture: Future[Any] = stationService ? QueryForIdStation(stationName)
-      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-      if(response.status == 0) staionId = Some(response.data.asInstanceOf[Int])
+      val responseFuture: Future[Any] = stationService ? QueryForIdStation(0,self,Random.nextInt(1000),stationName,-1)
+      val response = Await.result(responseFuture,duration).asInstanceOf[ResponseQueryForIdStation]
+      if(response.found) staionId = Some(response.stationId)
       staionId
     }
 
     def checkStationExists(stationName: String): Boolean = {
       var exists = false
-      val responseFuture: Future[Any] = stationService ? QueryForIdStation(stationName)
-      val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-      if(response.status == 0) exists = true
+      val responseFuture: Future[Any] = stationService ? QueryForIdStation(0,self,Random.nextInt(1000),stationName,-1)
+      val response = Await.result(responseFuture,duration).asInstanceOf[ResponseQueryForIdStation]
+      if(response.found) exists = true
       exists
       }
 

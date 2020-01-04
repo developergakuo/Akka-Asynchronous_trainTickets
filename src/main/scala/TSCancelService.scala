@@ -1,112 +1,137 @@
 import TSCommon.Commons._
-import akka.actor.{Actor, ActorRef}
-import akka.pattern.ask
-import akka.util.Timeout
+import akka.actor. ActorRef
 
-import scala.concurrent.duration._
-import scala.concurrent.Future
-import scala.concurrent.Await
 import java.util.{Calendar, Date}
+
+import akka.persistence._
 
 
 object TSCancelService {
 
-  class CancelService(orderService: ActorRef , orderOtherService: ActorRef , travelService: ActorRef ,
-                      travel2service: ActorRef , stationService: ActorRef , insidePayService: ActorRef ,
-                      seatService: ActorRef , userService: ActorRef , notificationService: ActorRef ) extends Actor {
+  case class CancelOderState(requests: Map[(ActorRef, Int), CancelRequest])
 
-    override def receive: Receive = {
-      case c: CancelOrder =>
-        val orderResult = getOrderByIdFromOrder(c.orderId)
-        orderResult match {
-          case Some(order) =>
-            if (order.status == OrderStatus().NOTPAID._1
-              || order.status == OrderStatus().PAID._1 || order.status == OrderStatus().CHANGE._1) {
+  case class RefundState(requests: Map[(ActorRef, Int), RefundRequest])
 
-              order.status = OrderStatus().CANCEL._1
-              // 0 -- not find order   1 - cancel success
-              if (cancelFromOrder(order)) {
-                //Draw back money
-                val money = calculateRefund(order)
-                if (drawbackMoney(money, c.accountId)) {
-                  // todo
-                  val accountResult = getAccount(order.accountId)
-                  accountResult match {
-                    case Some(user) =>
-                      val notifyInfo = NotifyInfo(user.email, c.orderId, user.userName, order.from, order.to, order.travelTime, new Date(), order.seatClass, order.seatNumber, order.price)
-                      notificationService ! Order_cancel_success(notifyInfo,sender())
-                    case None =>
-                      sender ! Response(1, "Can't find userinfo by user id.", null)
-                  }
-                } else sender() ! Response(1, "Error: DrawBack Error.", null)
-              } else {
-                sender() ! Response(1, "Error in order cancellation", null)
-              }
+  case class CancelRequest(var accountId: Int = -1, var order: Option[Order] = None, var account: Option[Account] = None,
+                           var isDrawnBack: Boolean = false, var isCancled: Boolean = false,var refundAmount: Double = 0)
 
-            } else {
-              sender() ! Response(1, "Order Status Cancel Not Permitted", null)
+  case class RefundRequest(var order: Option[Order] = None, var refundAmount: Double = 0)
+
+  case class CancelServiceSate(cancelRequests: CancelOderState, refundRequests: RefundState)
+
+  class CancelService(orderService: ActorRef, orderOtherService: ActorRef, travelService: ActorRef,
+                      travel2service: ActorRef, stationService: ActorRef, insidePayService: ActorRef,
+                      seatService: ActorRef, userService: ActorRef, notificationService: ActorRef) extends PersistentActor with AtLeastOnceDelivery {
+
+    var state: CancelServiceSate = CancelServiceSate(CancelOderState(Map()), RefundState(Map()))
+
+    override def preStart(): Unit = {
+      println("TravelService prestart")
+      super.preStart()
+    }
+
+    override def postRestart(reason: Throwable): Unit = {
+      println("TravelService post restart")
+      println(reason)
+      super.postRestart(reason)
+    }
+
+    override def persistenceId = "CancelService-id"
+
+    override def recovery: Recovery = super.recovery
+
+    override def receiveRecover: Receive = {
+      case SnapshotOffer(_, offeredSnapshot: CancelServiceSate) ⇒ state = offeredSnapshot
+      case RecoveryCompleted =>
+        println("TravelService RecoveryCompleted")
+      case x: Evt ⇒
+        println("recovering: " + x)
+        updateState(x)
+    }
+
+    def updateState(evt: Evt): Unit = evt match {
+      case e: CancelOrder =>
+        e.requester ! CancelOrderDelivered(e.deliveryId)
+        state = CancelServiceSate(CancelOderState(state.cancelRequests.requests + ((e.requester, e.requestId) -> CancelRequest(accountId = e.accountId))),
+          state.refundRequests)
+      case e: ResponseFindOrderById =>
+        confirmDelivery(e.deliveryId)
+        if(e.found) {
+          if(e.requestLabel.equals("CancelOrder")){
+            state.cancelRequests.requests.get((e.requester,e.requestId)).get.order=Some(e.order)
+            if (e.order.status == OrderStatus().NOTPAID._1
+              || e.order.status == OrderStatus().PAID._1 || e.order.status == OrderStatus().CHANGE._1) {
+              e.order.status = OrderStatus().CANCEL._1
+              if (e.sourceLabel.equals("Order")) cancelFromOrder(e.order,e.requester,e.requestId)
+              else if (e.sourceLabel.equals("OtherOrder")) cancelFromOtherOrder(e.order,e.requester,e.requestId)
             }
+          }
+          else if(e.requestLabel.equals("CalculateRefund")){
+              if (e.order.status == OrderStatus().NOTPAID._1 || e.order.status == OrderStatus().PAID._1) {
+                if (e.order.status == OrderStatus().NOTPAID._1)
+                  sender() ! Response(0, "Success. Refund error 0", 0)
+                else
+                  e.requester ! Response(0, "Success. ", calculateRefund(e.order))
+              } else sender() ! Response(1, "Order Status Cancel Not Permitted, Refund error", null)
+
+          }
+
+          }
+      case e: ResponseCancelOrder =>
+        confirmDelivery(e.deliveryId)
+        state.cancelRequests.requests.get((e.requester,e.requestId)).get.isCancled=e.canceled
+        val money = calculateRefund(state.cancelRequests.requests.get((e.requester,e.requestId)).get.order.get)
+        state.cancelRequests.requests.get((e.requester,e.requestId)).get.refundAmount=money
+        drawbackMoney(money,state.cancelRequests.requests.get((e.requester,e.requestId)).get.accountId,e.requester,e.requestId)
+
+      case e: ResponseDrawBack =>
+        confirmDelivery(e.deliveryId)
+        state.cancelRequests.requests.get((e.requester,e.requestId)).get.isDrawnBack=e.drawnBack
+        asyncGetAccount(state.cancelRequests.requests.get((e.requester,e.requestId)).get.accountId,e.requester,e.requestId)
+      case e: ResponseFindByUserId2 =>
+        confirmDelivery(e.deliverId)
+        e.account match {
+          case Some(account) =>
+            state.cancelRequests.requests.get((e.requester,e.requestId)).get.account= e.account
+            val user = account
+            val order= state.cancelRequests.requests.get((e.requester,e.requestId)).get.order.get
+            val notifyInfo = NotifyInfo(user.email, order.id, user.userName, order.from, order.to, order.travelTime, new Date(), order.seatClass, order.seatNumber, order.price)
+            deliver(notificationService.path)(deliveryId=> Order_cancel_success(notifyInfo,e.requester,deliveryId,e.requestId))
           case None =>
-            val orderOtherResult = getOrderByIdFromOrderOther(c.orderId)
-            orderOtherResult match {
-              case Some(order) =>
-                if (order.status == OrderStatus().NOTPAID._1
-                  || order.status == OrderStatus().PAID._1 || order.status == OrderStatus().CHANGE._1) {
+            e.requester ! Response(1, "Cancel error, user could not be found", None)
 
-                  order.status = OrderStatus().CANCEL._1
-                  if (cancelFromOrder(order)) {
-                    //Draw back money
-                    val money = calculateRefund(order)
-                    if (drawbackMoney(money, c.accountId)) {
-                      // todo
-                      val accountResult = getAccount(order.accountId)
-                      accountResult match {
-                        case Some(user) =>
-                          val notifyInfo = NotifyInfo(user.email, c.orderId, user.userName, order.from, order.to, order.travelTime, new Date(), order.seatClass, order.seatNumber, order.price)
-                          notificationService ! Order_cancel_success(notifyInfo,sender())
-                        case None =>
-                          sender ! Response(1, "Cann't find userinfo by user id.", null)
-                      }
-                    }
-                    else sender() ! Response(1, "Error: Drawback Error", null)
-                  }
-                  else sender() ! Response(1, "Error in order cancellation", null)
-
-
-                } else {
-                  sender() ! Response(1, "Order Status Cancel Not Permitted", null)
-                }
-              case None =>
-                sender() ! Response(1, "Order Not Found", null)
-            }
         }
+      case e:RequestComplete =>
+        confirmDelivery(e.deliveryId)
+    }
+
+    override def receiveCommand: Receive = {
+      case c: CancelOrder =>
+        persist(c)(updateState)
+        asyncGetOrderByIdFromOrder(c.orderId, "CancelOrder", c.requester, c.requestId)
+        AsyncGetOrderByIdFromOrderOther(c.orderId, "CancelOrder", c.requester, c.requestId)
+
+      case c: ResponseFindOrderById =>
+        persist(c)(updateState)
+
+      case c: ResponseCancelOrder =>
+        persist(c)(updateState)
+
+      case c: ResponseDrawBack =>
+        persist(c)(updateState)
+
+      case c: ResponseFindByUserId2 =>
+        persist(c)(updateState)
+
+      case c: RequestComplete =>
+        persist(c)(updateState)
 
       case c: CalculateRefund =>
-                val orderResult: Option[Order] = getOrderByIdFromOrder(c.orderId)
-                orderResult match {
-                  case Some(order) =>
-                    if (order.status == OrderStatus().NOTPAID._1 || order.status == OrderStatus().PAID._1) {
-                      if (order.status == OrderStatus().NOTPAID._1)
-                        sender() ! Response(0, "Success. Refoud 0", 0)
-                      else
-                        sender() ! Response(0, "Success. ", calculateRefund(order))
-                    } else
-                      sender() ! Response(1, "Order Status Cancel Not Permitted, Refound error", null);
-                  case None =>
-                    val orderResult2: Option[Order] = getOrderByIdFromOrderOther(c.orderId)
-                    orderResult2 match {
-                      case Some(order2) =>
-                        if (order2.status == OrderStatus().NOTPAID._1 || order2.status == OrderStatus().PAID._1) {
-                          if (order2.status == OrderStatus().NOTPAID._1)
-                            sender() ! Response(0, "Success. Refund error 0", 0)
-                          else
-                            sender() ! Response(0, "Success. ", calculateRefund(order2))
-                        } else sender() ! Response(1, "Order Status Cancel Not Permitted, Refund error", null);
-                      case None =>
-                        sender() ! Response(1, "Order Not Found", null)
-                    }
-                }
-            }
+        asyncGetOrderByIdFromOrder(c.orderId, "CalculateRefund", c.requester, c.requestId)
+        AsyncGetOrderByIdFromOrderOther(c.orderId, "CalculateRefund", c.requester, c.requestId)
+
+    }
+
         def calculateRefund(order: Order): Double = {
           var result = -1.0
           if (order.status == OrderStatus().NOTPAID._1) {
@@ -139,56 +164,35 @@ object TSCancelService {
         }
 
 
-        def cancelFromOrder(order: Order): Boolean = {
-          var result: Option[Boolean] = None
-          val responseFuture: Future[Any] = orderService ? CancelOrder(order.accountId, order.id)
-          val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-          if (response.status == 0) result = Some(true)
-          result.get
+        def cancelFromOrder(order: Order,requester: ActorRef, requestId: Int): Unit = {
+         deliver(orderService.path)(deliveryId => CancelOrder(order.accountId, order.id,deliveryId,requester,requestId))
         }
 
-        def cancelFromOtherOrder(order: Order): Boolean = {
-          var result: Option[Boolean] = None
-          val responseFuture: Future[Any] = orderOtherService ? CancelOrder(order.accountId, order.id)
-                val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-              if (response.status == 0) result = Some(true)
-
-          result.get
+        def cancelFromOtherOrder(order: Order,requester: ActorRef, requestId: Int ): Unit = {
+          deliver(orderOtherService.path)(deliveryId => CancelOrder(order.accountId, order.id,deliveryId,requester,requestId))
 
         }
 
-        def drawbackMoney(money: Double, userId: Int): Boolean = {
-          var result: Option[Boolean] = None
-          val responseFuture: Future[Any] = insidePayService ? DrawBack(userId, money)
-          val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-          if (response.status == 0) result = Some(true)
-          result.get
+        def drawbackMoney(money: Double, userId: Int,requester: ActorRef, requestId: Int): Unit = {
+
+        deliver(insidePayService.path)(deliveryId =>  DrawBack(userId, money,deliveryId,requester,requestId))
+
         }
 
-        def getAccount(accountId: Int): Option[Account] = {
-          var result: Option[Account] = None
-          val responseFuture: Future[Any] = userService ? FindByUserId2(accountId)
-          val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-          if (response.status == 0) result = Some(response.data.asInstanceOf[Account])
-          result
+        def asyncGetAccount(accountId: Int,requester: ActorRef, requestId: Int): Unit = {
+
+         deliver(userService.path) (deliveryId=> FindByUserId2(deliveryId,requester, requestId, accountId))
+
         }
 
 
-        def getOrderByIdFromOrder(orderId: Int): Option[Order] = {
-          var result: Option[Order] = None
-          val responseFuture: Future[Any] = orderService ? FindOrderById(orderId)
-          val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-          if (response.status == 0) result = Some(response.data.asInstanceOf[Order])
-          result
+        def asyncGetOrderByIdFromOrder(orderId: Int, requestLabel: String, requester: ActorRef, requestId: Int ): Unit = {
+          deliver(orderService.path)(deliveryId =>FindOrderById(orderId,deliveryId,requester,requestId,requestLabel,"Order"))
         }
 
+        def AsyncGetOrderByIdFromOrderOther(orderId: Int, requestLabel: String, requester: ActorRef, requestId: Int ): Unit = {
+          deliver(orderOtherService.path)(deliveryId =>FindOrderById(orderId,deliveryId,requester,requestId,requestLabel,"OtherOrder"))
 
-        def getOrderByIdFromOrderOther(orderId: Int): Option[Order] = {
-          var result: Option[Order] = None
-          val responseFuture: Future[Any] = orderOtherService ? FindOrderById(orderId)
-          val response = Await.result(responseFuture,duration).asInstanceOf[Response]
-          if (response.status == 0) result = Some(response.data.asInstanceOf[Order])
-          result
         }
   }
 }

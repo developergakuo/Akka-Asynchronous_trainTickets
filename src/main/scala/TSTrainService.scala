@@ -22,7 +22,7 @@ object TSTrainService {
       super.postRestart(reason)
     }
 
-    override def persistenceId = "TravelService-id"
+    override def persistenceId = "TrainService-id"
 
     override def recovery: Recovery = super.recovery
 

@@ -4,7 +4,7 @@ object TSConsignPriceService {
   case class ConfigRepository(consigns: Map[Int, ConsignPrice])
 
   class ConsignPriceService extends PersistentActor {
-    var state: ConfigRepository = ConfigRepository(Map())
+    var state: ConfigRepository = ConfigRepository(Map(0->ConsignPrice(0,0,0.2,5,3.0,2.0)))
 
     override def preStart(): Unit = {
       println("TravelService prestart")
@@ -17,7 +17,7 @@ object TSConsignPriceService {
       super.postRestart(reason)
     }
 
-    override def persistenceId = "TravelService-id"
+    override def persistenceId = "ConsignPriceService-id"
 
     override def recovery: Recovery = super.recovery
 
