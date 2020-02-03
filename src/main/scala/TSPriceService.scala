@@ -50,10 +50,10 @@ object TSPriceService {
       case c:CreateNewPriceConfig =>
         state.configs.get(c.priceConfig.id) match {
           case Some(_) =>
-            sender() ! Response(1, "Create failure: Config with similar id exists", None)
+            sender() ! Response(1, "CreateOrder failure: Config with similar id exists", None)
           case None =>
             persist(c)(updateState)
-            sender() ! Response(0, "Create success", None)
+            sender() ! Response(0, "CreateOrder success", None)
         }
 
       case c:FindById =>

@@ -51,11 +51,11 @@ object TSPaymentService {
       case c:Pay =>
         state.payments.get(c.info.orderId) match {
           case Some(_) =>
-            sender() ! Response(1, "Error: Payment already exists",None )
+            sender() ! ResponsePayment(paid = false,c.deliverID,c.requester,c.requestId)
 
           case None =>
             persist(c)(updateState)
-            sender() ! Response(0, "Success: Payment added",None )
+            sender() ! ResponsePayment(paid=true,c.deliverID,c.requester,c.requestId)
         }
       case c:AddMoney2 =>
         persist(c)(updateState)

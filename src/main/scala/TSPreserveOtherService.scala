@@ -12,6 +12,7 @@ object TSPreserveOtherService {
 
   case class PreserveOtherServiceState(requests: Map[(ActorRef,Int),Service])
 
+  case class IncludeOrder(order: Order, requester: ActorRef, requestId: Int) extends Evt
   class PreserveOtherService (ticketInfoService: ActorRef,
                               securityService: ActorRef, contactService:  ActorRef, travel2Service: ActorRef,
                               stationService: ActorRef, seatService: ActorRef, orderOtherService: ActorRef,
@@ -21,12 +22,12 @@ object TSPreserveOtherService {
    var state: PreserveOtherServiceState = PreserveOtherServiceState(Map())
 
     override def preStart(): Unit = {
-      println("UserService prestart")
+      println("TSPreserveOtherService prestart")
       super.preStart()
     }
 
     override def postRestart(reason: Throwable): Unit = {
-      println("UserService post restart")
+      println("TSPreserveOtherService post restart")
       println(reason)
       super.postRestart(reason)
     }
@@ -46,38 +47,91 @@ object TSPreserveOtherService {
 
     def updateState(evt: Evt): Unit = evt match {
       case e: Preserve ⇒
-        e.actorRef ! PreservationDelivered(e.deliveryId)
         val service = state.requests.getOrElse((e.actorRef, e.orderNumber), Service())
         service.oti = Some(e.oti)
         state =PreserveOtherServiceState (state.requests + ((e.actorRef, e.orderNumber) -> service))
-        deliver(securityService.path)(deliveryId => Check(e.actorRef, e.orderNumber, deliveryId, e.oti.accountId))
+
       case e: SecurityCheckResponse =>
-        confirmDelivery(e.deliveryId)
         val service = state.requests.getOrElse((e.requester, e.requestId), Service())
         println("service:"+ service)
         service.checkSecurity = e.isSecure
 
+      case e: ContactResponse =>
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+        service.getContactsById = e.contacts
+
+      case e: ResponseGetTripAllDetailInfo =>
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+        service.tripAllDetail = Some(e.gtdr)
+
+
+      case e: ResponseQueryForIdStation =>
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+        if (e.toOrFRom == 1) service.toStationId = e.stationId
+        else if (e.toOrFRom == 2) service.fromStationId = e.stationId
+
+      case e: ResponseQueryForTravel =>
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+          service.resultForTravel = Some(e.travel)
+
+
+      case e: ResponseInsertConsignRecord =>
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+        service.consigned = true
+
+      case e:ResponseFindByUserId2 =>
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+        service.account =  e.account
+
+      case e:IncludeOrder =>
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+        service.orderCreated =  Some(e.order)
+
+
+
+      case e: RequestComplete =>
+        state = PreserveOtherServiceState(state.requests - ((e.Requester,e.requestId)))
+    }
+
+    override def receiveCommand: Receive = {
+      case e:Preserve=>
+        println("TSPreserveOtherService Preserve  ")
+
+        persist(e)(updateState)
+        e.actorRef ! PreservationDelivered(e.deliveryId)
+        deliver(securityService.path)(deliveryId => Check(e.actorRef, e.orderNumber, deliveryId, e.oti.accountId))
+
+      case e: SecurityCheckResponse =>
+        println("TSPreserveOtherService   SecurityCheckResponse")
+
+        persist(e)(updateState)
+        confirmDelivery(e.deliveryId)
+        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
+
         if (e.isSecure) deliver(contactService.path)(deliveryId => FindContactsById(deliveryId, e.requester, e.requestId, service.oti.get.contactsId))
         else e.requester ! Response(1, "Order not Secured", None)
 
-      case e: ContactResponse =>
-        confirmDelivery(e.deliveryId)
-        val service = state.requests.getOrElse((e.requester, e.requestId), Service())
-        service.getContactsById = e.contacts
-        e.contacts match {
+      case c: ContactResponse =>
+        println("TSPreserveOtherService   ContactResponse")
+        persist(c)(updateState)
+        confirmDelivery(c.deliveryId)
+        val service = state.requests.getOrElse((c.requester, c.requestId), Service())
+        c.contacts match {
           case Some(contacts) =>
             service.getContactsById = Some(contacts)
             val gtdi: TripAllDetailInfo =
               TripAllDetailInfo(service.oti.get.tripId, service.oti.get.date, service.oti.get.from, service.oti.get.to)
-            deliver(travel2Service.path)(deliveryId => GetTripAllDetailInfo(deliveryId, e.requester, e.requestId, gtdi, sender = Some(self) ))
+            deliver(travel2Service.path)(deliveryId => GetTripAllDetailInfo(deliveryId, c.requester, c.requestId, gtdi, sender = Some(self) ))
           case None =>
-            e.requester ! Response(1, "User contacts not found", None)
-
+            c.requester ! Response(1, "User contacts not found", None)
         }
+
       case e: ResponseGetTripAllDetailInfo =>
+        println("TSPreserveOtherService   ResponseGetTripAllDetailInfo")
+
+        persist(e)(updateState)
         confirmDelivery(e.deliveryId)
         val service = state.requests.getOrElse((e.requester, e.requestId), Service())
-        service.tripAllDetail = Some(e.gtdr)
         if (e.found) {
           if ((service.oti.get.seatType == SeatClass().firstClass._1) && (e.gtdr.tripResponse.confortClass == 0))
             sender() ! Response(1, "First class seats not enough", None)
@@ -91,12 +145,14 @@ object TSPreserveOtherService {
         else sender() ! Response(1, "Trip all detail info Error", None)
 
       case e: ResponseQueryForIdStation =>
+        println("TSPreserveOtherService   ResponseQueryForIdStation")
+
+        persist(e)(updateState)
         confirmDelivery(e.deliveryId)
         val service = state.requests.getOrElse((e.requester, e.requestId), Service())
-        if (e.toOrFRom == 1) service.toStationId = e.stationId
-        else if (e.toOrFRom == 2) service.fromStationId = e.stationId
+
         //Are to and from stations set?
-        if (service.toStationId != -1 && service.fromStationId != -1) {
+        if (service.toStationId != -1 || service.fromStationId != -1) {
           val contacts = service.getContactsById.get
           val trip: Trip = service.tripAllDetail.get.trip
           val oti = service.oti.get
@@ -105,15 +161,20 @@ object TSPreserveOtherService {
             documentType = contacts.documentType, contactsName = contacts.name, from = service.fromStationId,
             to = service.toStationId, trainNumber = oti.tripId, accountId = oti.accountId, seatClass = oti.seatType,
             travelDate = service.oti.get.date, travelTime = service.tripAllDetail.get.tripResponse.startingTime)
-          service.orderCreated = Some(order)
+         persist(IncludeOrder(order,e.requester,e.requestId))(updateState)
           val query: Travel = Travel(trip, oti.from, oti.to, new Date())
+          println("TSPreserveOtherService   query travel")
+
           deliver(ticketInfoService.path)(deliveryID => QueryForTravel(deliveryID, e.requester, e.requestId, query))
         }
+
       case e: ResponseQueryForTravel =>
-        confirmDelivery(e.deliveryID)
+        println("TSPreserveOtherService   ResponseQueryForTravel")
+
         val service = state.requests.getOrElse((e.requester, e.requestId), Service())
         if (e.found)  {
-          service.resultForTravel = Some(e.travel)
+          persist(e)(updateState)
+          confirmDelivery(e.deliveryID)
           val oti = service.oti.get
           val order = service.orderCreated.get
           val fromStationId = service.fromStationId
@@ -127,13 +188,12 @@ object TSPreserveOtherService {
             //Dispatch the seat 2nd class
             val seat = Seat( oti.date, order.trainNumber, fromStationId, toStationId, SeatClass().secondClass._1)
             deliver(seatService.path)(deliveryId => DistributeSeat(deliveryId, e.requester, e.requestId, seat))
-
           }
-
         }
         else sender() ! Response(1, "Trip is not feasible:", None)
-      case e: ResponseDistributeSeat =>
-        println("distribute seat success resp")
+
+      case e:ResponseDistributeSeat =>
+        println("TSPreserveOtherService   ResponseDistributeSeat")
         confirmDelivery(e.deliveryId)
         val service = state.requests.getOrElse((e.requester, e.requestId), Service())
         val order = service.orderCreated.get
@@ -150,10 +210,10 @@ object TSPreserveOtherService {
           }
         }
 
-        deliver(orderOtherService.path)(deliveryID => Create(deliveryID, e.requester, e.requestId, order))
-      case e: ResponseCreate =>
-        println("order create resp")
+        deliver(orderOtherService.path)(deliveryID => CreateOrder(deliveryID, e.requester, e.requestId, order))
 
+      case e: ResponseCreateOrder =>
+        println("order create resp")
         confirmDelivery(e.deliveryId)
         val service = state.requests.getOrElse((e.requester, e.requestId), Service())
         if (e.created) {
@@ -189,7 +249,6 @@ object TSPreserveOtherService {
         else sender() ! Response(1, "Assurance creation error:", None)
 
       case e: ResponseCreateFoodOrder =>
-
         println("ResponseCreateFoodOrder create resp")
         confirmDelivery(e.deliverId)
         val service = state.requests.getOrElse((e.requester, e.requestId), Service())
@@ -208,13 +267,13 @@ object TSPreserveOtherService {
 
         }
         else sender() ! Response(1, "FoodOrder creation error:", None)
+
       case e: ResponseInsertConsignRecord =>
         println("ResponseInsertConsignRecord create resp")
-
         confirmDelivery(e.deliverId)
         val service = state.requests.getOrElse((e.requester, e.requestId), Service())
         if(e.created){
-          service.consigned = true
+          persist(e)(updateState)
         }
         else sender() ! Response(1, "Consign creation error:", None)
         deliver(userService.path)(deliverId => FindByUserId2(deliverId, e.requester,e.requestId,service.orderCreated.get.accountId))
@@ -225,7 +284,7 @@ object TSPreserveOtherService {
         e.account match {
           case Some(account) =>
             val order = service.orderCreated.get
-            service.account =  e.account
+            persist(e)(updateState)
             val notifyInfo: NotifyInfo = NotifyInfo(account.email, order.id, account.userName, order.from, order.to,
               order.travelTime, new Date, order.seatClass, order.seatNumber, order.price)
             deliver(notifyService.path)(deliverId => Preserve_success(deliverId, e.requester,e.requestId,notifyInfo,sender()))
@@ -233,48 +292,9 @@ object TSPreserveOtherService {
             sender() !   Response(1, "User Account not Found:", None)
         }
 
-      case e: RequestComplete =>
-        confirmDelivery(e.deliveryId)
-        state = PreserveOtherServiceState(state.requests - ((e.Requester,e.requestId)))
-    }
-
-    override def receiveCommand: Receive = {
-      case c:Preserve=>
-        persistAsync(c)(updateState)
-      //check order securitys
-      case c: SecurityCheckResponse =>
-        persistAsync(c)(updateState)
-
-      case c: ContactResponse =>
-        persistAsync(c)(updateState)
-
-      case c: ResponseGetTripAllDetailInfo =>
-        persistAsync(c)(updateState)
-
-      case c: ResponseQueryForIdStation =>
-        persistAsync(c)(updateState)
-
-      case c: ResponseQueryForTravel =>
-        persistAsync(c)(updateState)
-
-      case c:ResponseDistributeSeat =>
-        persistAsync(c)(updateState)
-
-      case c: ResponseCreate =>
-        persistAsync(c)(updateState)
-
-      case c: ResponseCreateAssurance =>
-        persistAsync(c)(updateState)
-
-      case c: ResponseCreateFoodOrder =>
-        persistAsync(c)(updateState)
-
-      case c: ResponseInsertConsignRecord =>
-        persistAsync(c)(updateState)
-      case c:ResponseFindByUserId2 =>
-        persistAsync(c)(updateState)
       case c: RequestComplete =>
-        persistAsync(c)(updateState)
+        confirmDelivery(c.deliveryId)
+        persist(c)(updateState)
 
     }
 

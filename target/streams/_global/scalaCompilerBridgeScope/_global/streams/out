@@ -1,0 +1,1 @@
+[warn] insecure HTTP request is deprecated 'http://dl.bintray.com/dnvriend/maven'; switch to HTTPS or opt-in as ("dnvriend" at "http://dl.bintray.com/dnvriend/maven").withAllowInsecureProtocol(true)

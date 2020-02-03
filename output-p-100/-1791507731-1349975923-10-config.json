@@ -1,0 +1,1 @@
+[{"actorName":"akka://TrainTicket/user/insidePaymentService","actorType":"TSInsidePaymentService$InsidePaymentService","actorSuperType":".*","killProbability":1.0,"messages":[{"msgType":"TSCommon.Commons$ResponseModifyOrder","dropProbability":0.0,"duplication":0.0,"delay":0,"senderName":"akka://TrainTicket/user/orderOtherService","senderType":".*","senderSuperType":".*"}]}]

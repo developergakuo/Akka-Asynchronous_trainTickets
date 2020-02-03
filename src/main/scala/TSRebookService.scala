@@ -78,17 +78,15 @@ object TSRebookService {
               }
             }
             else {
+              sender() ! (1, "Order status not valid for change.", null)
 
             }
           }
           else if(e.requestLabel.equals("PayDifference")){
             val request = state.paydifferences.requests.get((e.requester, e.requestId)).get
-
             val gtdi = TripAllDetailInfo(request.rebookInfo.tripId,request.rebookInfo.date, queryForStationName(e.order.from), queryForStationName(e.order.to))
             // TripAllDetail
             asyncGetTripAllDetailInformation(gtdi, request.rebookInfo.tripId,e.requester,e.requestId, e.requestLabel)
-
-
           }
 
         }
@@ -125,6 +123,7 @@ object TSRebookService {
 
             }
             else if (oldPrice == request.ticketPrice) {
+
               //do nothing
               updateOrder(request.order.get, request.rebookInfo,request.tripAllDetail.get, request.ticketPrice,e.requester, e.requestId,"Rebook" )
             } else {
@@ -135,8 +134,6 @@ object TSRebookService {
           }
           else  if(e.label.equals("PayDifference")){
             val request = state.paydifferences.requests.get((e.requester, e.requestId)).get
-
-
             var ticketPrice = 0.0
             if (request.rebookInfo.seatType == SeatClass().firstClass._1) {
               ticketPrice = e.gtdr.tripResponse.priceForConfortClass
@@ -144,11 +141,9 @@ object TSRebookService {
               ticketPrice = e.gtdr.tripResponse.priceForEconomyClass
             }
             val oldPrice = request.order.get.price
-
              payDifferentMoney(request.rebookInfo.orderId, request.rebookInfo.tripId,
                request.rebookInfo.loginId, ticketPrice - oldPrice,e.requester,e.requestId)
           }
-
 
           }
         else{
@@ -174,7 +169,8 @@ object TSRebookService {
         val oldTripId = order.trainNumber
         val info = request.rebookInfo
         if ((tripGD(oldTripId) && tripGD(info.tripId)) || (!tripGD(oldTripId) && !tripGD(info.tripId))) {
-           updateOrder(order, info.tripId,e.requester, e.requestId, e.label)
+          println("we are updating your order1: "+ order.status)
+          updateOrder(order, info.tripId,e.requester, e.requestId, e.label)
         }
         else {
           deleteOrder(order.id, oldTripId,e.requester,e.requestId,e.label)
@@ -204,7 +200,7 @@ object TSRebookService {
           createOrder(order, order.trainNumber,e.requester,e.requestId,e.requestLabel)
 
         }
-      case e: ResponseCreate =>
+      case e: ResponseCreateOrder =>
         if(e.requestLabel.equals("Rebook")){
 
           confirmDelivery(e.deliveryId)
@@ -250,7 +246,7 @@ object TSRebookService {
         persist(c)(updateState)
       case c: ResponseDeleteOrder =>
         persist(c)(updateState)
-      case c: ResponseCreate =>
+      case c: ResponseCreateOrder =>
         persist(c)(updateState)
       case c: PayDifference =>
         persist(c)(updateState)
@@ -264,8 +260,17 @@ object TSRebookService {
     }
 
     def  updateOrder(order: Order,  info: RebookInfo,  gtdr: TripAllDetail,  ticketPrice: Double, requester: ActorRef, requestId: Int, label: String): Unit = {
+
+
+      order.trainNumber =info.tripId
+      order.boughtDate = new Date()
+      order.status = OrderStatus().CHANGE._1
+      order.price = ticketPrice//Set ticket price
+      order.seatClass = info.seatType
+      order.travelDate = info.date
+      order.travelTime = gtdr.trip.startingTime
       if (info.seatType == SeatClass().firstClass._1) {//Dispatch the seat
-          dispatchSeat(info.date, order.trainNumber, order.from, order.to, SeatClass().firstClass._1,requester, requestId,label)
+        dispatchSeat(info.date, order.trainNumber, order.from, order.to, SeatClass().firstClass._1,requester, requestId,label)
       } else {
           dispatchSeat(info.date, order.trainNumber, order.from, order.to, SeatClass().secondClass._1,requester, requestId,label)
       }
@@ -322,7 +327,7 @@ object TSRebookService {
       var service: ActorRef = null
       if (tripId ==1  || tripId == 2 ) service = orderService
       else service = orderOtherService
-      deliver(service.path)(deliveryId=>  Create(deliveryId,requester,requestId,order,requestLabel = label))
+      deliver(service.path)(deliveryId=>  CreateOrder(deliveryId,requester,requestId,order,requestLabel = label))
     }
 
     def  updateOrder( order: Order,  tripId: Int,requester: ActorRef, requestId: Int,label: String):Unit =  {

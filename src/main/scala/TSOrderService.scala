@@ -45,9 +45,9 @@ object TSOrderService {
     }
 
     def updateState(evt: Evt): Unit = evt match {
-      case c: Create ⇒
+      case c: CreateOrder ⇒
         state = orderRepository(state.orders + (c.newOrder.id -> c.newOrder))
-        sender() ! ResponseCreate(c.deliveryId,c.requester,c.requestId,c.newOrder,created = true)
+        sender() ! ResponseCreateOrder(c.deliveryId,c.requester,c.requestId,c.newOrder,created = true)
       case c: DeleteOrder =>
         state = orderRepository(state.orders - c.orderId)
 
@@ -62,13 +62,15 @@ object TSOrderService {
             sender() ! ResponseFindOrderById(null, c.deliveryId,c.requester,c.requestId,c.requestLabel,"OtherOrder")
         }
 
-      case c: Create =>
+      case c: CreateOrder =>
         state.orders.get(c.newOrder.id) match {
           case Some(_) =>
-            sender() ! ResponseCreate(c.deliveryId,c.requester,c.requestId,c.newOrder,created = false,c.requestLabel)
+            sender() ! ResponseCreateOrder(c.deliveryId,c.requester,c.requestId,c.newOrder,created = false,c.requestLabel)
           case None =>
-            persist(c)(updateState)
-            sender() ! ResponseCreate(c.deliveryId,c.requester,c.requestId,c.newOrder,created = true,c.requestLabel)
+            //persist(c)(updateState)
+            //state = orderRepository(state.orders + (c.newOrder.id -> c.newOrder))
+
+            sender() ! ResponseCreateOrder(c.deliveryId,c.requester,c.requestId,c.newOrder,created = true,c.requestLabel)
 
         }
       case c:SaveChanges =>
@@ -76,7 +78,7 @@ object TSOrderService {
           case Some(order) =>
             sender() ! Response(1, "Order with similar id does not exist", order)
           case None =>
-            persist(Create(0,self,Random.nextInt(1000),c.order))(updateState)
+            persist(CreateOrder(0,self,Random.nextInt(1000),c.order))(updateState)
 
             sender() ! Response(0, "Success: Order Changed", None)
         }
@@ -84,7 +86,7 @@ object TSOrderService {
         state.orders.get(c.orderId) match {
           case Some(order) =>
             order.status = OrderStatus().CANCEL._1
-            persist(Create(0,self,Random.nextInt(1000),order))(updateState)
+            persist(CreateOrder(0,self,Random.nextInt(1000),order))(updateState)
             sender() ! ResponseCancelOrder(canceled = true,c.deliveryId,c.requester,c.requestId,c.requestLabel)
           case None =>
             sender() ! ResponseCancelOrder(canceled = false,c.deliveryId,c.requester,c.requestId,c.requestLabel)
@@ -249,7 +251,7 @@ object TSOrderService {
       case c:UpdateOrder =>
         state.orders.get(c.order.id) match {
           case Some(order) =>
-            saveChanges(c.order)
+            //saveChanges(c.order)
             sender() ! ResponseUpdateOrder(c.deliveryId,c.requester,c.requestId,update = true,requestLabel=c.requestLabel)
           case None =>
             sender() ! ResponseUpdateOrder(c.deliveryId,c.requester,c.requestId,c.requestLabel)
@@ -257,7 +259,7 @@ object TSOrderService {
     }
 
     def saveChanges(order: Order): Unit = {
-      persist(Create(0,self,Random.nextInt(1000),order))(updateState)
+      persist(CreateOrder(0,self,Random.nextInt(1000),order))(updateState)
 
     }
     def queryOrders(qi:OrderInfo, accountId: Int):List[Order] = { //1.Get all orders of the user

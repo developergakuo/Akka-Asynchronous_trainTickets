@@ -1,0 +1,1 @@
+[{"actorName":"akka://TrainTicket/user/client","actorType":"TSClient$Client","actorSuperType":".*","killProbability":1.0,"messages":[{"msgType":"TSCommon.Commons$PaymentDelivered","dropProbability":0.0,"duplication":0.0,"delay":0,"senderName":"akka://TrainTicket/user/insidePaymentService","senderType":".*","senderSuperType":".*"}]}]

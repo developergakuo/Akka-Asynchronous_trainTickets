@@ -1,10 +1,10 @@
-import Services.{system, _}
-import TSCommon.Commons._
 import InputData._
-import akka.actor.{ActorSystem, Props}
+import Services._
+import TSCommon.Commons._
+import akka.actor.ActorSystem
+import akka.pattern.ask
 import akka.testkit.{ImplicitSender, TestKit}
 import org.scalatest._
-import akka.pattern.ask
 
 import scala.concurrent.Await
 
@@ -15,15 +15,16 @@ class  PaymentTestSpec() extends TestKit(ActorSystem("WebshopTest")) with Implic
   }
   "A client actor" must {
     "return orderPaid message on paying a valid order" in {
+      //client login
       client ! ClientLogin("userName2", "psw2")
+      //client pays for an already preserved but unpaid order
       client ! ClientPay(exampleOtherOrderUnpaid)
       expectMsgType[OrderPaid]
+      //get  the order
       val orderFuture = orderOtherService ? GetOrderById(exampleOtherOrderUnpaid.id)
       val paidOrder = Await.result(orderFuture,duration).asInstanceOf[ResponseFindOrderById].order
-      println("Order status: "+paidOrder.status)
-      client ! ClientRebook(paidOrder, trips(paidOrder.trainNumber-1))
-      expectMsgType[OrderRebooked]
-
+      //The order should be paid
+      paidOrder.status should equal(OrderStatus().PAID._1)
     }
   }
 }

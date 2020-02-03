@@ -96,7 +96,7 @@ object InputData {
   val newTrip1 = Trip(3,3,3,new Date(),1,List(1,2,4),4)
   val exampleOtherOrder = Order(1,new Date(),new Date(),new Date(),1,"userName1",1,1,4,1,1,4,1,4,OrderStatus().PAID._1,35)
   val exampleOtherOrderUnpaid = Order(2,new Date(),new Date(),new Date(),1,"userName1",1,1,4,1,1,4,2,10,OrderStatus().NOTPAID._1,35)
-
+  val exampleOtherOrderPaid = Order(3,new Date(),new Date(),new Date(),1,"userName1",1,1,4,1,1,4,2,10,OrderStatus().PAID._1,35)
 
 
 

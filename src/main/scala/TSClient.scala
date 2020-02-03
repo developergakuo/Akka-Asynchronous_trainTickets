@@ -226,8 +226,19 @@ object TSClient {
       case Response(0, message, _) =>
         println("======== Client General success:  " + message)
         state.receiver ! Response(0, message, None)
+
+      case c:GetAllOrders =>
+        println("client get all orders")
+        val orders1: Future[Any] = orderService ? c
+        val orders1Response: List[Order] = Await.result(orders1, duration).asInstanceOf[List[Order]]
+
+        val orders2: Future[Any] = orderOtherService ? c
+        val orders2Response: List[Order] = Await.result(orders2, duration).asInstanceOf[List[Order]]
+        sender ! orders1Response ++ orders2Response
+
       case c =>
         println("======== miscellaneous: " + c)
+
 
     }
 

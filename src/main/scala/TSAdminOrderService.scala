@@ -68,7 +68,7 @@ object TSAdminOrderService {
         var service: ActorRef = null
         if (c.request.trainNumber ==1 || c.request.trainNumber == 2)  service = orderService
         else  service = orderOtherService
-        val response: Future[Any] = service ? Create(c.request)
+        val response: Future[Any] = service ? CreateOrder(c.request)
         response onComplete {
           case Success(res) =>
             if (res.asInstanceOf[Response].status == 0) sender() ! Response(0, "Success", None)

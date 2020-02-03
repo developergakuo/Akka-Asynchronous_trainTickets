@@ -84,7 +84,7 @@ object Commons {
   case class RouteInfo(routeId: Int, startStation: Int, endStation: Int, stationList: List[Int], distanceList: List[Int])
   case class  PriceConfig(id: Int, trainType: Int, routeId: Int, basicPriceRate: Double, firstClassPriceRate: Double)
 
- case  class Order(var id: Int, boughtDate: Date, travelDate: Date, travelTime: Date, accountId: Int, contactsName: String, var documentType: Int = -1, var contactsDocumentNumber: Int = -1, var trainNumber: Int = -1, var coachNumber: Int = -1, var seatClass: Int = -1, var seatNumber: Int = -1, var from: Int = -1, var to: Int = -1, var status: Int = -1, var price: Double = 0.0)
+ case  class Order(var id: Int, var boughtDate: Date, var travelDate: Date, var travelTime: Date, accountId: Int, contactsName: String, var documentType: Int = -1, var contactsDocumentNumber: Int = -1, var trainNumber: Int = -1, var coachNumber: Int = -1, var seatClass: Int = -1, var seatNumber: Int = -1, var from: Int = -1, var to: Int = -1, var status: Int = -1, var price: Double = 0.0)
  case class OrderTicketsInfo (contactsId: Int, tripId: Int, seatType: Int, loginToken: String, accountId: Int, date: Date, from: String, to: String, assurance: Int)
 
 
@@ -179,7 +179,7 @@ object Commons {
   case class RetrieveTravel(tripId: Int) extends Evt
   case class UpdateTravel(travelInfo: TravelInfo) extends Evt
   case class DeleteTravel(tripId: Int) extends Evt
-  case class QueryTravel(deliveryId: Long,requester: ActorRef, RequestId: Int, tripInfo: TripInfo,var trip_route: List[(Trip, Route)] = List()) extends Evt
+  case class QueryTravel(deliveryId: Long,var requester: ActorRef, RequestId: Int, tripInfo: TripInfo,var trip_route: List[(Trip, Route)] = List()) extends Evt
   case class QueryTravelComplete(requester: ActorRef,RequestId: Int) extends Evt
   case class GetTripAllDetailInfo(deliveryId: Long, requester: ActorRef, requestId: Int,gtdi: TripAllDetailInfo, var temRoute: Option[Route] = None,var tempTrip: Option[Trip]= None,var label: String = "",var sender: Option[ActorRef] =None ) extends Evt
  case class ResponseGetTripAllDetailInfo(deliveryId: Long, requester: ActorRef, requestId: Int,gtdr: TripAllDetail, found: Boolean,var label: String = "",var sender: Option[ActorRef] =None) extends Evt
@@ -290,8 +290,8 @@ object Commons {
  case class ResponseFindOrderById(order: Order, var deliveryId: Long = 0, var requester: ActorRef = null, var requestId: Int = -1, var requestLabel:String ="" , var sourceLabel:String ="", var found: Boolean = false ) extends Evt
 
 
- case class Create(deliveryId: Long, requester: ActorRef,requestId: Int,newOrder: Order,var requestLabel:String ="") extends Evt
- case class ResponseCreate(deliveryId: Long, requester: ActorRef,requestId: Int,newOrder: Order, created: Boolean,var requestLabel:String ="") extends Evt
+ case class CreateOrder(deliveryId: Long, requester: ActorRef, requestId: Int, newOrder: Order, var requestLabel:String ="") extends Evt
+ case class ResponseCreateOrder(deliveryId: Long, requester: ActorRef, requestId: Int, newOrder: Order, created: Boolean, var requestLabel:String ="") extends Evt
 
   case class SaveChanges(order: Order) extends Evt
 
@@ -311,9 +311,11 @@ object Commons {
  case class ResponseQueryAlreadySoldOrders(soldTicket: SoldTicket, var deliveryId: Long = 0, var requester: ActorRef = null, var requestId: Int = -1, var requestLabel:String ="", var found: Boolean = false,var label: String = "",var sender:Option[ActorRef] = None,var tripId: Int = -1) extends Evt
   case class GetAllOrders() extends Evt
 
-  case class ModifyOrder(orderId: Int, status: Int) extends Evt
+  case class ModifyOrder(orderId: Int, status: Int, var deliveryId: Long = 0, var requester: ActorRef = null, var requestId: Int = -1) extends Evt
+ case class ResponseModifyOrder(modified: Boolean, var deliveryId: Long = 0, var requester: ActorRef = null, var requestId: Int = -1) extends Evt
 
-  case class GetOrderPrice(orderId: Int) extends Evt
+
+ case class GetOrderPrice(orderId: Int) extends Evt
 
   case class PayOrder(orderId: Int) extends Evt
 
@@ -358,7 +360,8 @@ object Commons {
  case class PayDifference(info: RebookInfo, var deliveryId: Long = 0, var requester: ActorRef = null, var requestId: Int = -1, var requestLabel:String =""  ) extends Evt
 
  // inside service
- case class Pay( info: PaymentInfo, var deliverID: Long = 0) extends Evt
+ case class Pay( info: PaymentInfo, var deliverID: Long = 0, var requester: ActorRef = null, var requestId: Int = 0) extends Evt
+ case class ResponsePayment( paid: Boolean, var deliverID: Long = 0, var requester: ActorRef = null, var requestId: Int = 0) extends Evt
  case class CreateAccount(info: AccountInfo) extends Evt
  case class AddMoney(deliveryId: Long, userId: Int,  money: Double) extends Evt
   case class  MoneyReceived(deliveryId: Long)
@@ -485,7 +488,7 @@ object Commons {
 
  case class FindAssuranceByOrderId(orderId: Int) extends Evt
 
- //case class Create(typeIndex: Int, orderId: String) extends Evt
+ //case class CreateOrder(typeIndex: Int, orderId: String) extends Evt
 
  case class DeleteById(assuranceId: Int) extends Evt
 
@@ -608,6 +611,8 @@ object Commons {
  case class PreservationDelivered(deliveryId: Long)
 
 
+
+ case class GetOrders()
 
 
 
